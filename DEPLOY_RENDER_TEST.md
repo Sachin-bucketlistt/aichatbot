@@ -4,7 +4,7 @@ Free, no credit card, about 10 minutes. Not for production: the free web service
 15 min idle (first request after that takes ~1 min), and the free Redis (25 MB) does not persist.
 
 ## Steps (you do these; they need your Render account)
-1. Sign up at https://render.com (GitHub login is easiest) and allow it to read `darsh-del/aichatbot`.
+1. Sign up at https://render.com (GitHub login is easiest) and allow it to read `Sachin-bucketlistt/aichatbot`.
 2. **New → Blueprint** → pick the repo → choose branch **`feat/crm-v2-chat`** → Apply.
 3. When prompted, paste: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `WEAVIATE_URL`, `WEAVIATE_API_KEY`
    (same values as `backend/.env`).
