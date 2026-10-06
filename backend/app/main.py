@@ -11,10 +11,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from app.config import settings
+from app.crm_chat import router as crm_router
 from app.dashboard import get_summary, idle_scan_loop, list_summaries
 from app.llm import stream_chat_response
 from app.mcp_client import close_http_client
-from app.rate_limit import RateLimitMiddleware
+from app.rate_limit import RateLimitMiddleware, has_valid_chat_key
 from app.schemas import ChatRequest, UserInfoRequest, AttachmentUploadResponse
 from app.session_store import init_redis, close_redis, save_user_info
 from app.attachments import store_attachment, AttachmentError
@@ -47,6 +48,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Chatbot Backend", lifespan=lifespan)
 
+app.include_router(crm_router)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -63,6 +65,12 @@ def health() -> dict:
     return {"status": "ok", "model": settings.llm_model}
 
 
+def _require_chat_key(http_request: Request) -> None:
+    """No-op unless CHAT_API_KEY is set; then 401 without a matching Bearer token."""
+    if settings.chat_api_key and not has_valid_chat_key(http_request):
+        raise HTTPException(401, "Unauthorized")
+
+
 @app.post("/api/chat")
 async def chat(request: ChatRequest, http_request: Request) -> StreamingResponse:
     """Stream a chat completion as Server-Sent Events.
@@ -73,6 +81,7 @@ async def chat(request: ChatRequest, http_request: Request) -> StreamingResponse
     frontend that does nothing special still gets a stable session across
     requests, with no client-side UUID generation required.
     """
+    _require_chat_key(http_request)
     session_id = request.session_id or http_request.cookies.get("session_id") or str(uuid.uuid4())
     logger.info(
         "POST /api/chat — %d messages, session=%s",
@@ -80,7 +89,7 @@ async def chat(request: ChatRequest, http_request: Request) -> StreamingResponse
         session_id,
     )
     response = StreamingResponse(
-        stream_chat_response(request.messages, session_id),
+        stream_chat_response(request.messages, session_id, channel=request.channel),
         media_type="text/event-stream",
     )
     # ponytail: secure mirrors the scheme uvicorn itself sees — if this ever
@@ -98,8 +107,9 @@ async def chat(request: ChatRequest, http_request: Request) -> StreamingResponse
     return response
 
 @app.post("/api/session/user-info")
-async def store_user_info(request: UserInfoRequest) -> dict:
+async def store_user_info(request: UserInfoRequest, http_request: Request) -> dict:
     """Store captured user contact information in their Redis session."""
+    _require_chat_key(http_request)
     if not request.session_id:
         return {"status": "error", "message": "No session ID provided"}
         

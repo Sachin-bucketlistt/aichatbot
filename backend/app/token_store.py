@@ -7,12 +7,19 @@ are NOT part of that resent history, so without this the token is lost between
 turns and the model re-runs send_otp. Here we cache the token server-side keyed
 by the client's session_id and reuse it until it expires.
 
-ponytail: in-memory single-process dict with a TTL. Fine for one uvicorn worker
-on the demo box. Move to Redis (same interface) if you run multiple workers or
-need the token to survive a restart. The token is never sent to the client — it
-lives only here and is injected into authenticated MCP calls server-side.
+The in-memory dicts below are the fast path; when Redis is configured the same
+values are also written through to it (persist_*) and read back on a memory miss
+(restore_session_auth), so a restart or a second worker doesn't log customers
+out. Redis is best-effort: any failure falls back to memory-only, as before.
+The token is never sent to the client — it lives only here (and in Redis, so keep
+that private/authenticated) and is injected into authenticated MCP calls server-side.
 """
+import logging
 import time
+
+from app import session_store
+
+logger = logging.getLogger(__name__)
 
 # session_id -> (authToken, expiry_epoch)
 _store: dict[str, tuple[str, float]] = {}
@@ -107,3 +114,74 @@ def pop_pending_phone(session_id: str | None) -> str | None:
         return None
     phone, expiry = entry
     return phone if time.time() <= expiry else None
+
+
+# --- Redis write-through / read-through (see module docstring) ---------------
+
+def _tok_key(session_id: str) -> str:
+    return f"auth:token:{session_id}"
+
+
+def _phone_key(session_id: str) -> str:
+    return f"auth:phone:{session_id}"
+
+
+async def persist_token(session_id: str | None) -> None:
+    """Copy this session's in-memory token to Redis, with the remaining TTL."""
+    client = session_store.redis_client
+    entry = _store.get(session_id) if session_id else None
+    if not client or not entry:
+        return
+    ttl = int(entry[1] - time.time())
+    if ttl <= 0:
+        return
+    try:
+        await client.set(_tok_key(session_id), entry[0], ex=ttl)
+    except Exception:  # pylint: disable=broad-except
+        logger.exception("Could not persist auth token to Redis")
+
+
+async def persist_pending_phone(session_id: str | None) -> None:
+    client = session_store.redis_client
+    entry = _pending_phone.get(session_id) if session_id else None
+    if not client or not entry:
+        return
+    ttl = int(entry[1] - time.time())
+    if ttl <= 0:
+        return
+    try:
+        await client.set(_phone_key(session_id), entry[0], ex=ttl)
+    except Exception:  # pylint: disable=broad-except
+        logger.exception("Could not persist pending phone to Redis")
+
+
+async def forget_pending_phone(session_id: str | None) -> None:
+    """Drop the Redis copy once the pending phone has been consumed (or failed)."""
+    client = session_store.redis_client
+    if not client or not session_id:
+        return
+    try:
+        await client.delete(_phone_key(session_id))
+    except Exception:  # pylint: disable=broad-except
+        logger.exception("Could not delete pending phone from Redis")
+
+
+async def restore_session_auth(session_id: str | None) -> None:
+    """On a memory miss, reload this session's token / pending phone from Redis
+    (after a restart, or when another worker handled the earlier turns).
+    Call once at the start of a request, before anything reads get_token()."""
+    client = session_store.redis_client
+    if not client or not session_id:
+        return
+    try:
+        if get_token(session_id) is None:
+            token = await client.get(_tok_key(session_id))
+            if token:
+                ttl = await client.ttl(_tok_key(session_id))
+                _store[session_id] = (token, time.time() + (ttl if ttl and ttl > 0 else TTL_SECONDS))
+        if session_id not in _pending_phone:
+            phone = await client.get(_phone_key(session_id))
+            if phone:
+                _pending_phone[session_id] = (phone, time.time() + TTL_SECONDS)
+    except Exception:  # pylint: disable=broad-except
+        logger.exception("Could not restore auth state from Redis")

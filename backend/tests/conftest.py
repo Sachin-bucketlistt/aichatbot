@@ -22,6 +22,8 @@ class FakeRedis:
 
     def __init__(self, data: dict | None = None):
         self._data = data or {}  # {key: {field: value}}
+        self._strings = {}
+        self._ttls = {}
 
     async def hgetall(self, key):
         return self._data.get(key, {})
@@ -38,6 +40,22 @@ class FakeRedis:
 
     async def expire(self, key, seconds):
         pass
+
+    async def set(self, key, value, nx=False, ex=None):
+        if nx and key in self._strings:
+            return None
+        self._strings[key] = value
+        self._ttls[key] = ex
+        return True
+
+    async def get(self, key):
+        return self._strings.get(key)
+
+    async def ttl(self, key):
+        return self._ttls.get(key) or -1
+
+    async def delete(self, key):
+        self._strings.pop(key, None)
 
     async def scan_iter(self, match="*"):
         for key in list(self._data.keys()):

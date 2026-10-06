@@ -32,9 +32,11 @@ from app.retriever import retrieve
 from app.schemas import ChatMessage
 from app.attachments import resolve_attachment
 from app.flow_guard import is_protected_turn
+from app.handoff import HANDOFF_PROMPT, HANDOFF_SCHEMA, HANDOFF_TOOL, HANDOFF_REASONS
 from app.token_store import (
     AUTH_TOOLS, extract_token, get_token, set_token,
     extract_phone, set_pending_phone, pop_pending_phone,
+    persist_token, persist_pending_phone, forget_pending_phone, restore_session_auth,
 )
 from app.tools import TOOL_SCHEMAS, dispatch_tool
 from app.session_store import (
@@ -44,6 +46,18 @@ from app.session_store import (
 from app.stream_sanitizer import StreamSanitizer
 
 MAX_TOOL_ITERATIONS = 8
+
+# Appended LAST to the dynamic block when the caller says channel="whatsapp"
+# (recency wins over the KB's own table/markdown guidance). Not in the cached
+# static block, so web traffic's prompt cache is untouched.
+WHATSAPP_FORMAT_PROMPT = (
+    "## Channel: WhatsApp — OVERRIDES any formatting guidance above\n"
+    "This reply is shown in WhatsApp, which does not render Markdown. "
+    "NEVER use tables, headings (#), horizontal rules, or [text](url) links. "
+    "Use only *bold* (single asterisks) and _italic_, simple '-' bullet lines, and bare URLs. "
+    "Compare options as short bullet lines, not a table. "
+    "Keep paragraphs short and the whole reply under about 1000 characters where possible."
+)
 MAX_OUTPUT_TOKENS = 1500
 
 # Matches bungee/bungy/bungie, case-insensitive — the only trigger for
@@ -261,6 +275,8 @@ async def build_messages(
     chat_messages: list[ChatMessage],
     session_id: str | None = None,
     nudge_contact: bool = False,
+    channel: str | None = None,
+    handoff_enabled: bool = False,
 ) -> list[dict]:
     """Prepend the server-controlled system prompt to the client conversation.
 
@@ -351,6 +367,11 @@ async def build_messages(
         "first checking if they are open, as the entire category is likely closed."
     )
 
+    if handoff_enabled:
+        dynamic_parts.append(HANDOFF_PROMPT)
+    if channel == "whatsapp":
+        dynamic_parts.append(WHATSAPP_FORMAT_PROMPT)
+
     system_message = {
         "role": "system",
         "content": [
@@ -401,6 +422,7 @@ _TOOL_STATUS_LABELS = {
     "get_my_bookings": "Fetching bookings…",
     "search_web": "Searching the web…",
     "escalate_and_capture_lead": "Creating support ticket…",
+    HANDOFF_TOOL: "Connecting you to our team…",
 }
 
 
@@ -418,11 +440,14 @@ async def _execute_tool(call, session_id: str | None, mcp_session=None) -> dict:
                 # to the session/summary on its own, since a phone number
                 # nobody has verified proves nothing.
                 set_pending_phone(session_id, extract_phone(call.function.arguments))
+                await persist_pending_phone(session_id)
             elif tool_name == "verify_otp":
                 token = extract_token(result.get("result", ""))
                 set_token(session_id, token)
                 if token:
+                    await persist_token(session_id)
                     phone = extract_phone(call.function.arguments) or pop_pending_phone(session_id)
+                    await forget_pending_phone(session_id)
                     if phone:
                         await save_verified_phone(session_id, phone)
         else:
@@ -438,12 +463,18 @@ async def _execute_tool(call, session_id: str | None, mcp_session=None) -> dict:
 async def _run_tool_loop(
     messages: list[dict],
     session_id: str | None = None,
+    handoff_state: dict | None = None,
 ) -> AsyncGenerator[str | tuple[str, str], None]:
     """Run the tool-calling loop as an async generator.
 
     Every LLM call uses stream=True so the final answer streams token-by-token
     via yield ("delta", text).  Tool calls are reassembled from stream chunks
     transparently.  Status strings are yielded as plain strings.
+
+    handoff_state is None for the web chat (no handoff tool offered). The CRM
+    endpoint passes a dict; the model's request_human_handoff call then sets
+    handoff_state["reason"] — a side channel, so the yielded event shapes
+    (and every existing consumer of them) are unchanged.
     """
     t_loop_start = time.perf_counter()
     mcp_tools = await load_catalog_tools()
@@ -454,7 +485,7 @@ async def _run_tool_loop(
         "[bungee-summary] tool %s this turn", "enabled" if bungee_query else "disabled (non-bungee query)"
     )
     logger.info("Loaded %d MCP tools, %d local tools", len(mcp_tools), len(TOOL_SCHEMAS))
-    all_tools = TOOL_SCHEMAS + mcp_tools
+    all_tools = TOOL_SCHEMAS + mcp_tools + ([HANDOFF_SCHEMA] if handoff_state is not None else [])
     first_iter_tools = [
         t for t in all_tools if t["function"]["name"] != "search_web"
     ] if mcp_tools else all_tools
@@ -557,6 +588,17 @@ async def _run_tool_loop(
         has_verify = any(c.function.name == "verify_otp" for c in tool_calls)
         needs_mcp = any(c.function.name in MCP_ALLOWED_TOOLS for c in tool_calls)
 
+        async def _exec(call, mcp_session):
+            if call.function.name == HANDOFF_TOOL:
+                try:
+                    reason = json.loads(call.function.arguments or "{}").get("reason")
+                except (ValueError, AttributeError):
+                    reason = None
+                if handoff_state is not None:
+                    handoff_state["reason"] = reason if reason in HANDOFF_REASONS else "other"
+                return {"status": "ok", "message": "Handoff recorded. Tell the customer a teammate will follow up here."}
+            return await _execute_tool(call, session_id, mcp_session=mcp_session)
+
         stack = None
         mcp_session = None
         if needs_mcp:
@@ -566,7 +608,7 @@ async def _run_tool_loop(
         try:
             if len(tool_calls) == 1 or has_verify:
                 for call in tool_calls:
-                    result = await _execute_tool(call, session_id, mcp_session=mcp_session)
+                    result = await _exec(call, mcp_session)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": call.id,
@@ -575,7 +617,7 @@ async def _run_tool_loop(
                     })
             else:
                 results = await asyncio.gather(
-                    *(_execute_tool(c, session_id, mcp_session=mcp_session) for c in tool_calls)
+                    *(_exec(c, mcp_session) for c in tool_calls)
                 )
                 for call, result in zip(tool_calls, results):
                     messages.append({
@@ -614,7 +656,8 @@ def _error_message(exc: BaseException) -> str:
 
 
 async def stream_chat_response(
-    chat_messages: list[ChatMessage], session_id: str | None = None
+    chat_messages: list[ChatMessage], session_id: str | None = None,
+    channel: str | None = None, handoff_state: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     """Run the tool loop then stream the final answer as SSE frames.
 
@@ -624,6 +667,7 @@ async def stream_chat_response(
     """
     t_request = time.perf_counter()
     try:
+        await restore_session_auth(session_id)
         if session_id and await get_message_count(session_id) >= settings.max_messages_per_session:
             # No LLM call at all past the cap - cheap to check, and keeps a
             # capped-out session from still paying for a model round-trip.
@@ -639,18 +683,20 @@ async def stream_chat_response(
                 ),
                 "done": False,
             })
-            yield _sse({"delta": "", "done": True})
+            yield _sse({"delta": "", "done": True, "session_capped": True})
             return
 
         t0 = time.perf_counter()
         nudge_contact = bool(session_id) and await should_nudge_for_contact(session_id)
-        messages = await build_messages(chat_messages, session_id, nudge_contact)
+        messages = await build_messages(
+            chat_messages, session_id, nudge_contact, channel, handoff_enabled=handoff_state is not None
+        )
         logger.info("build_messages took %.3fs (%d messages total)", time.perf_counter() - t0, len(messages))
 
         token_count = 0
         assistant_content = []
         sanitizer = StreamSanitizer()
-        async for event in _run_tool_loop(messages, session_id):
+        async for event in _run_tool_loop(messages, session_id, handoff_state):
             if isinstance(event, tuple):
                 _, delta = event
                 if delta:

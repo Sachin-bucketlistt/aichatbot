@@ -33,6 +33,16 @@ class ChatRequest(BaseModel):
         default=None,
         description="Optional client-generated session UUID, used to persist auth tokens across requests."
     )
+    channel: str | None = Field(
+        default=None,
+        max_length=32,
+        description='Optional delivery channel, e.g. "whatsapp". Unknown values behave like the default web chat.',
+    )
+    request_id: str | None = Field(
+        default=None,
+        max_length=256,
+        description="Accepted for forward compatibility (caller's message id); not acted on yet.",
+    )
 
 class UserInfo(BaseModel):
     name: str = ""

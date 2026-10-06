@@ -174,7 +174,7 @@ def test_chat_declines_with_friendly_message_once_session_is_capped(monkeypatch)
     frames = _sse_frames(response.text)
     assert len(frames) == 2
     assert "start a fresh chat" in frames[0]
-    assert frames[1] == 'data: {"delta": "", "done": true}'
+    assert frames[1] == 'data: {"delta": "", "done": true, "session_capped": true}'
 
 
 def test_chat_proceeds_normally_one_message_under_the_cap(monkeypatch):

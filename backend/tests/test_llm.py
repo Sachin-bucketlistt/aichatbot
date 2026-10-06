@@ -466,7 +466,7 @@ def test_stream_chat_response_declines_without_an_llm_call_once_capped(monkeypat
     assert len(frames) == 2
     assert '"done": false' in frames[0]
     assert "start a fresh chat" in frames[0]
-    assert frames[1] == 'data: {"delta": "", "done": true}\n\n'
+    assert frames[1] == 'data: {"delta": "", "done": true, "session_capped": true}\n\n'
 
 
 def test_stream_chat_response_does_not_check_the_cap_without_a_session_id(monkeypatch):

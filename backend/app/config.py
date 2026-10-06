@@ -16,6 +16,9 @@ Key settings:
     LOGIN_PROMPT_AFTER     — user messages before showing the login-details prompt, default 3
     MAX_MESSAGES_PER_SESSION — user messages allowed per chat session before a friendly
                              "start a new chat" reply replaces the LLM call, default 15
+    CHAT_API_KEY           — optional; when set, POST /api/chat and /api/session/user-info need
+                             `Authorization: Bearer <key>`, and valid-key calls skip the rate limit
+    CHAT_LIMIT_PER_MINUTE  — per-IP /api/chat limit for callers without a valid key, default 20
     DASHBOARD_API_KEY      — bearer token guarding GET /api/admin/session-summaries (optional,
                              endpoints return 503 if unset — see app/dashboard.py)
     IDLE_SUMMARY_MINUTES   — inactivity before a session is summarized for the dashboard, default 15
@@ -56,6 +59,12 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = 7200          # 2 hours
     login_prompt_after: int = 3              # prompt after 3 user messages
     max_messages_per_session: int = 15       # past this, a friendly "start a new chat" reply
+    # Machine-to-machine callers (e.g. the WhatsApp CRM). Blank = /api/chat
+    # stays open exactly as before (the browser frontend can't hold a secret).
+    # Set it on a dedicated deployment to require `Authorization: Bearer <key>`;
+    # requests carrying a valid key also skip the per-IP rate limit.
+    chat_api_key: str = ""
+    chat_limit_per_minute: int = 20          # per-IP, requests without a valid key
     # Employee-dashboard session summaries — see app/dashboard.py. Idle-scan
     # runs regardless of REDIS_URL/DASHBOARD_API_KEY; it just no-ops without
     # them (nothing to scan / no way to authenticate reads).
