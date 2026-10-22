@@ -515,16 +515,25 @@ async def _run_tool_loop(
         from app.cache_limiter import _enforce_cache_limits
         safe_messages = _enforce_cache_limits(messages)
         
-        response = await litellm.acompletion(
+        call_kwargs = dict(
             model=settings.llm_model,
             messages=safe_messages,
             tools=iter_tools,
-            tool_choice=iter_choice,
             max_tokens=MAX_OUTPUT_TOKENS,
             num_retries=2,
             timeout=30,
             stream=True,
         )
+        try:
+            response = await litellm.acompletion(tool_choice=iter_choice, **call_kwargs)
+        except litellm.BadRequestError as exc:
+            # Some models (e.g. claude-sonnet-5-5) reject forced tool_choice
+            # ("any"/"tool"). Forcing is only a latency optimisation, so degrade to auto.
+            if iter_choice != "required" or "tool_choice" not in str(exc):
+                raise
+            logger.warning("Model rejected forced tool_choice; retrying with auto")
+            iter_choice = "auto"
+            response = await litellm.acompletion(tool_choice=iter_choice, **call_kwargs)
 
         # Consume the stream: yield content deltas in real-time, collect tool
         # calls incrementally so we can execute them after the stream ends.

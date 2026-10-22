@@ -100,6 +100,32 @@ def test_tool_loop_includes_bungee_summary_for_bungee_query(monkeypatch):
     assert "get_activities_summary" in tool_names
 
 
+def test_tool_loop_falls_back_to_auto_when_model_rejects_forced_tool_choice(monkeypatch):
+    import litellm
+    import app.llm as llm
+
+    monkeypatch.setattr(llm, "load_catalog_tools", lambda: _async_return(_FAKE_MCP_TOOLS))
+    choices = []
+
+    async def _fake_acompletion(*_args, **kwargs):
+        choices.append(kwargs["tool_choice"])
+        if kwargs["tool_choice"] == "required":
+            raise litellm.BadRequestError(
+                'tool_choice: type "tool" and "any" are not supported for this model.',
+                model="m", llm_provider="anthropic",
+            )
+        return _ImmediateFinalAnswer()
+
+    monkeypatch.setattr(llm.litellm, "acompletion", _fake_acompletion)
+
+    async def _drain():
+        async for _ in llm._run_tool_loop([{"role": "user", "content": "what are the bungee jumping prices in Rishikesh"}]):
+            pass
+
+    asyncio.run(_drain())
+    assert choices == ["required", "auto"]
+
+
 # --- StreamSanitizer (dash/activity-ID streaming backstop, §1.2/§2.2) -----
 
 from app.stream_sanitizer import StreamSanitizer
