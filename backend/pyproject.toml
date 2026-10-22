@@ -13,7 +13,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
-    "litellm>=1.40",
+    "litellm==1.92.0",  # pinned: newer releases import `MCPError` (mcp v2 name) but we pin mcp<2 -> ImportError on a fresh build
     "orjson>=3.9",  # litellm imports this at runtime for streaming but doesn't declare it
     "pydantic-settings>=2.3",
     "python-dotenv>=1.0",

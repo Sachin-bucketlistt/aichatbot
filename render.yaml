@@ -22,7 +22,7 @@ services:
       - key: WEAVIATE_API_KEY
         sync: false
       - key: LLM_MODEL
-        value: anthropic/claude-sonnet-5
+        value: anthropic/claude-sonnet-5-5
       - key: MCP_SERVER_URL
         value: https://mcp.bucketlistt.com/mcp
       - key: MAX_MESSAGES_PER_SESSION
