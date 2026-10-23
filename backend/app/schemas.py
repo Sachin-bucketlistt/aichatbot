@@ -31,6 +31,7 @@ class ChatRequest(BaseModel):
     )
     session_id: str | None = Field(
         default=None,
+        max_length=128,
         description="Optional client-generated session UUID, used to persist auth tokens across requests."
     )
     channel: str | None = Field(
@@ -54,5 +55,5 @@ class UserInfo(BaseModel):
     email: str = ""
 
 class UserInfoRequest(BaseModel):
-    session_id: str
+    session_id: str = Field(max_length=128)
     user_info: UserInfo

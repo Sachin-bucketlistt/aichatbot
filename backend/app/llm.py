@@ -434,7 +434,9 @@ async def _execute_tool(call, session_id: str | None, mcp_session=None) -> dict:
     """Execute a single tool call and return the result dict."""
     tool_name = call.function.name
     t0 = time.perf_counter()
-    logger.info("Executing tool: %s  args=%s", tool_name, call.function.arguments[:200] if call.function.arguments else "")
+    # OTP tools carry the customer's phone number / OTP code: never log their arguments.
+    logged_args = "<redacted>" if tool_name in ("send_otp", "verify_otp") else (call.function.arguments or "")[:200]
+    logger.info("Executing tool: %s  args=%s", tool_name, logged_args)
     try:
         if tool_name in MCP_ALLOWED_TOOLS:
             _inject_auth_token(call, session_id)

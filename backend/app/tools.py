@@ -73,7 +73,7 @@ def escalate_and_capture_lead(
 
     data.append(lead_record)
     LEADS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    logger.info("Lead captured: %s (name=%s, phone=%s, urgency=%s)", ticket_id, name or "Guest", phone or "n/a", urgency)
+    logger.info("Lead captured: %s (urgency=%s, phone=%s)", ticket_id, urgency, f"***{phone[-4:]}" if phone else "n/a")
 
     return {
         "status": "success",
@@ -237,7 +237,7 @@ async def dispatch_tool(name: str, arguments: str, session_id: str | None = None
         return {"error": f"unknown tool: {name}"}
     kwargs = json.loads(arguments) if arguments else {}
     t0 = time.perf_counter()
-    logger.info("dispatch_tool: %s(%s)", name, ", ".join(f"{k}={v!r}" for k, v in kwargs.items()))
+    logger.info("dispatch_tool: %s(args=%s)", name, ", ".join(sorted(kwargs)))  # names only: values can be PII
     result = func(**kwargs)
     if inspect.isawaitable(result):
         result = await result

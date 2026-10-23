@@ -19,6 +19,10 @@ Key settings:
     CHAT_API_KEY           — optional; when set, POST /api/chat and /api/session/user-info need
                              `Authorization: Bearer <key>`, and valid-key calls skip the rate limit
     CHAT_LIMIT_PER_MINUTE  — per-IP /api/chat limit for callers without a valid key, default 20
+    CHAT_KEY_LIMIT_PER_MINUTE — combined limit for all requests with a valid key, default 120 (0 = off)
+    TRUSTED_PROXY_HOPS     — reverse proxies appending to X-Forwarded-For, default 1 (client IP is
+                             taken that many entries from the right; 0 = ignore the header)
+    DOCS_ENABLED           — true to keep /docs and /openapi.json when CHAT_API_KEY is set, default false
     DASHBOARD_API_KEY      — bearer token guarding GET /api/admin/session-summaries (optional,
                              endpoints return 503 if unset — see app/dashboard.py)
     IDLE_SUMMARY_MINUTES   — inactivity before a session is summarized for the dashboard, default 15
@@ -65,6 +69,15 @@ class Settings(BaseSettings):
     # requests carrying a valid key also skip the per-IP rate limit.
     chat_api_key: str = ""
     chat_limit_per_minute: int = 20          # per-IP, requests without a valid key
+    # Ceiling on ALL requests carrying a valid key combined, so a leaked key can't
+    # run up an unbounded LLM bill. 0 = off. Generous: the CRM sends ~1 call per customer message.
+    chat_key_limit_per_minute: int = 120
+    # How many reverse proxies sit in front of the app and append to X-Forwarded-For.
+    # The client IP is the entry that many places from the RIGHT (the left side is
+    # caller-controlled and spoofable). 0 = ignore the header, use the socket address.
+    trusted_proxy_hops: int = 1
+    # /docs, /redoc and /openapi.json are hidden when CHAT_API_KEY is set, unless this is true.
+    docs_enabled: bool = False
     # Employee-dashboard session summaries — see app/dashboard.py. Idle-scan
     # runs regardless of REDIS_URL/DASHBOARD_API_KEY; it just no-ops without
     # them (nothing to scan / no way to authenticate reads).

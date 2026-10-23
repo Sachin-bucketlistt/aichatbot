@@ -2,6 +2,7 @@
 logic lives in app.llm / app.tools.
 """
 import asyncio
+import hmac
 import logging
 import uuid
 from contextlib import asynccontextmanager
@@ -46,7 +47,15 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down")
 
 
-app = FastAPI(title="Chatbot Backend", lifespan=lifespan)
+# With a CHAT_API_KEY the API is meant for a trusted gateway: don't publish its schema.
+_docs_off = bool(settings.chat_api_key) and not settings.docs_enabled
+app = FastAPI(
+    title="Chatbot Backend",
+    lifespan=lifespan,
+    docs_url=None if _docs_off else "/docs",
+    redoc_url=None if _docs_off else "/redoc",
+    openapi_url=None if _docs_off else "/openapi.json",
+)
 
 app.include_router(crm_router)
 app.add_middleware(RateLimitMiddleware)
@@ -128,7 +137,8 @@ def _check_dashboard_auth(http_request: Request) -> None:
     tells you "this feature is off", not "your token is wrong"."""
     if not settings.dashboard_api_key:
         raise HTTPException(503, "Dashboard API not configured (set DASHBOARD_API_KEY)")
-    if http_request.headers.get("authorization") != f"Bearer {settings.dashboard_api_key}":
+    supplied = http_request.headers.get("authorization", "")
+    if not hmac.compare_digest(supplied.encode(), f"Bearer {settings.dashboard_api_key}".encode()):
         raise HTTPException(401, "Unauthorized")
 
 
@@ -153,7 +163,7 @@ def get_session_summary(session_id: str, http_request: Request) -> dict:
     return record
 
 @app.post("/api/chat/attachments", response_model=AttachmentUploadResponse)
-async def upload_attachment(file: UploadFile = File(...)) -> AttachmentUploadResponse:
+async def upload_attachment(http_request: Request, file: UploadFile = File(...)) -> AttachmentUploadResponse:
     """Validate, scan, and store one attachment. Returns an id to reference
     from a subsequent /api/chat call — see schemas.ChatMessage.attachment_ids.
 
@@ -161,6 +171,7 @@ async def upload_attachment(file: UploadFile = File(...)) -> AttachmentUploadRes
     the payload ~33% and breaks the existing text-length cap semantics on
     ChatMessage.content).
     """
+    _require_chat_key(http_request)
     try:
         result = await store_attachment(file)
     except AttachmentError as exc:

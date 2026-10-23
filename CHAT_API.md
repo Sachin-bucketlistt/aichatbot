@@ -38,7 +38,7 @@ Local dev: `http://localhost:8000`
 | `GET` | `/api/health` | Liveness probe, returns configured model | none | no |
 | `POST` | `/api/v2/chat` | **CRM/WhatsApp endpoint:** one JSON reply, handoff and cap flags, idempotent retries | Bearer `CHAT_API_KEY` (required) | yes, 20/min/IP, **skipped with a valid key** |
 | `POST` | `/api/chat` | Send conversation, receive streamed answer (SSE) | Bearer `CHAT_API_KEY` if configured | yes, 20/min/IP, skipped with a valid key |
-| `POST` | `/api/chat/attachments` | Upload one file, get an `attachment_id` | none | no |
+| `POST` | `/api/chat/attachments` | Upload one file, get an `attachment_id` | Bearer `CHAT_API_KEY` if configured | no |
 | `POST` | `/api/session/user-info` | Save name/phone/email into a session | Bearer `CHAT_API_KEY` if configured | no |
 | `GET` | `/api/admin/session-summaries` | List idle-session summaries | Bearer token | no |
 | `GET` | `/api/admin/session-summaries/{session_id}` | One session summary | Bearer token | no |
@@ -72,7 +72,7 @@ Streams the assistant's reply for the supplied conversation.
 | Field | Type | Required | Constraints | Notes |
 |---|---|---|---|---|
 | `messages` | array of `ChatMessage` | yes | 1 to **40** items | Full history, oldest first. The **last** item is the one being answered, and should have `role: "user"`. |
-| `session_id` | string \| null | no | any string | See §3.2. |
+| `session_id` | string \| null | no | max 128 chars | See §3.2. |
 | `channel` | string \| null | no | max 32 chars | `"whatsapp"` appends WhatsApp formatting rules to the prompt (no tables, headings or links; `*bold*`; short replies). Unknown values behave like web chat. Defaults to `whatsapp` on `/api/v2/chat` only. |
 | `request_id` | string \| null | no | max 256 chars | Caller's message id. Used for idempotent retries on `/api/v2/chat` only; ignored by `/api/chat`. |
 
@@ -265,7 +265,7 @@ Type is detected from file **content** (magic bytes), not the filename or declar
   still answers, just without the file.
 - Max **5** attachments per message. Only the **last** message in `messages` has its attachments
   resolved.
-- This endpoint is **not rate limited**.
+- This endpoint is **not rate limited**. It requires the `CHAT_API_KEY` bearer token when one is configured.
 - **WhatsApp specifics:** Meta delivers media as a media ID you must download (with your access
   token) and then re-upload here. WhatsApp audio, video, stickers, WebP and GIF are **not
   supported** by this API (415). Handle those in the gateway (for example, ask the user to send text).
@@ -305,12 +305,13 @@ Implemented in `rate_limit.py` as middleware.
 | Scope | **`POST /api/chat` and `POST /api/v2/chat`** (exact path match). Every other endpoint is unlimited. |
 | Limit | **20 requests per 60 seconds** per client IP |
 | Algorithm | Sliding window (timestamps of the last 60s) |
-| Client IP | First entry of `X-Forwarded-For` if present, else the TCP peer address |
-| Bypass | A request with a valid `Authorization: Bearer <CHAT_API_KEY>` is **not counted and not limited** |
+| Client IP | The `X-Forwarded-For` entry `TRUSTED_PROXY_HOPS` places from the **right** (default 1, the address the nearest proxy saw). The left side is caller-controlled and ignored. `0` ignores the header and uses the TCP peer address |
+| Valid key | Not limited per IP, but all valid-key requests together are capped at `CHAT_KEY_LIMIT_PER_MINUTE` (default **120**, `0` = off) to bound LLM spend. Over it: `429` |
 | Over limit | `429` with `{"detail": "Too many requests. Please slow down."}` |
 | Headers | **No** `Retry-After` or `X-RateLimit-*` headers are sent |
 | Storage | In-process memory: resets on restart, **not shared across workers** |
-| Configurable | Yes: `CHAT_LIMIT_PER_MINUTE` env var (default 20) |
+| Configurable | `CHAT_LIMIT_PER_MINUTE` (default 20), `CHAT_KEY_LIMIT_PER_MINUTE` (default 120), `TRUSTED_PROXY_HOPS` (default 1) |
+| Memory | Idle buckets are swept once more than 10,000 are tracked |
 
 Requests that are rejected with 429 are not counted. Validation failures (422) **do** count,
 since the limiter runs before validation.
@@ -473,6 +474,9 @@ This is configuration only, no code change.
 | `LLM_MODEL` | `anthropic/claude-sonnet-5-5` | Model used (via litellm) |
 | `CHAT_API_KEY` | blank | Bearer key. Blank: `/api/chat` open, `/api/v2/chat` returns 503. Set: required on `/api/v2/chat`, `/api/chat`, `/api/session/user-info` |
 | `CHAT_LIMIT_PER_MINUTE` | 20 | Per-IP limit for requests without a valid key |
+| `CHAT_KEY_LIMIT_PER_MINUTE` | 120 | Combined limit for all requests with a valid key (0 = off) |
+| `TRUSTED_PROXY_HOPS` | 1 | Reverse proxies appending to `X-Forwarded-For`; set to match your hosting |
+| `DOCS_ENABLED` | false | `/docs`, `/redoc`, `/openapi.json` are hidden when `CHAT_API_KEY` is set unless this is `true` |
 | `SYSTEM_PROMPT_FILE` | `data/knowledge_base.md` | Bot personality and knowledge |
 | `MCP_SERVER_URL` | blank | Enables live catalog tools |
 | `WEAVIATE_URL` | blank | Enables RAG retrieval |
@@ -493,6 +497,8 @@ This is configuration only, no code change.
 2. **Shared-IP rate limit** (§6) applies to keyless traffic; the key bypass solves it for the gateway.
 3. **Login state** has no flag in the API; the model asks for the OTP in chat (§12.8).
 4. **No server-side timeout** on streams; gateway must enforce one.
+   Also: the per-session message cap can be dodged by sending a new `session_id` each time; the
+   per-key ceiling (§6) is what bounds total cost.
 5. **The rate limiter lives in process memory**: it resets on restart and is not shared across
    workers. OTP login tokens are now also written to Redis and restored after a restart.
 6. **Message cap, history persistence and attachments depend on Redis.** Attachments return 503 without it.
@@ -668,8 +674,8 @@ else:
   §4. The upload endpoint (`/api/chat/attachments`) needs Redis and a ClamAV daemon; the Render
   test blueprint has no ClamAV, so uploads there return 503 (fail closed). Also note that the
   upload endpoint does not require `CHAT_API_KEY`.
-- `/docs` (Swagger) cannot send the key because the API reads the header manually and declares no
-  security scheme, so there is no Authorize button. Use curl or Postman, or add an `HTTPBearer`
-  dependency if you want Swagger to work.
+- `/docs` and `/openapi.json` are **hidden (404) whenever `CHAT_API_KEY` is set**, unless
+  `DOCS_ENABLED=true`. Even when shown, Swagger cannot send the key (no security scheme is
+  declared, so no Authorize button). Use curl or Postman.
 - If `/api/v2/chat` returns 200 with only the generic "I hit a snag" error, the real cause is in
   the server logs (search for `Chat request failed`).
