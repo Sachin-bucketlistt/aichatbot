@@ -7,6 +7,7 @@ so a CRM retry never re-runs tools. /api/chat is untouched by any of this.
 """
 import json
 import logging
+import re
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -25,6 +26,15 @@ router = APIRouter()
 IDEMPOTENCY_TTL_SECONDS = 600
 IN_FLIGHT_TTL_SECONDS = 120   # > the CRM's 60s timeout, so a crashed request frees its key
 HANDOFF_FALLBACK_REPLY = "I'm connecting you with our team. Someone will follow up with you here shortly."
+
+
+# WhatsApp strikethrough is ~text~; the model (and the KB) write Markdown ~~text~~.
+# Deterministic backstop so a prompt slip never shows stray tildes to a customer.
+_DOUBLE_TILDE_RE = re.compile(r"~~(?=\S)(.+?)(?<=\S)~~")
+
+
+def _to_whatsapp_strike(text: str) -> str:
+    return _DOUBLE_TILDE_RE.sub(r"~\1~", text)
 
 
 class ChatV2Response(BaseModel):
@@ -97,6 +107,8 @@ async def chat_v2(request: ChatRequest, http_request: Request, response: Respons
             capped = capped or bool(payload.get("session_capped"))
 
         reply = "".join(parts).strip()
+        if (request.channel or "whatsapp") == "whatsapp":
+            reply = _to_whatsapp_strike(reply)
         last_user = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
         reason = None if capped else handoff_state.get("reason") or detect_handoff(last_user)
         if reason and not reply:

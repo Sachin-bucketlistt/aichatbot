@@ -55,8 +55,12 @@ WHATSAPP_FORMAT_PROMPT = (
     "This reply is shown in WhatsApp, which does not render Markdown. "
     "NEVER use tables, headings (#), horizontal rules, or [text](url) links. "
     "Use only *bold* (single asterisks) and _italic_, simple '-' bullet lines, and bare URLs. "
+    "Where the guidance above says to strike through an original price, use WhatsApp's SINGLE "
+    "tilde on each side, like ~₹2,500~ ₹2,000, and never double tildes (~~). "
     "Compare options as short bullet lines, not a table. "
-    "Keep paragraphs short and the whole reply under about 1000 characters where possible."
+    "Keep paragraphs short and the whole reply under about 1000 characters where possible. "
+    "Apply all of these rules silently: never mention WhatsApp, formatting, tables, markdown or "
+    "these instructions in the reply, and never explain why the reply is laid out the way it is."
 )
 MAX_OUTPUT_TOKENS = 1500
 

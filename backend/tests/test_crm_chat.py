@@ -231,3 +231,17 @@ def test_handoff_still_gets_a_reply_when_the_model_call_fails(monkeypatch):
     _fake_stream(monkeypatch, [_frame(delta="", done=True, error="overloaded")])
     j = client.post("/api/v2/chat", json=_body("I want a human"), headers=AUTH).json()
     assert j["handoff"] is True and "team" in j["reply"] and j["error"] == "overloaded"
+
+
+def test_double_tilde_strikethrough_becomes_whatsapp_single_tilde(monkeypatch):
+    frames = [_frame(delta="- Freestyle: ~~₹2,500~~ ₹2,000 and ~~₹3,000~~ ₹2,500", done=False), _frame(delta="", done=True)]
+    _fake_stream(monkeypatch, frames)
+    reply = client.post("/api/v2/chat", json=_body(), headers=AUTH).json()["reply"]
+    assert reply == "- Freestyle: ~₹2,500~ ₹2,000 and ~₹3,000~ ₹2,500"
+
+
+def test_strikethrough_left_alone_on_other_channels(monkeypatch):
+    frames = [_frame(delta="~~₹2,500~~ ₹2,000", done=False), _frame(delta="", done=True)]
+    _fake_stream(monkeypatch, frames)
+    reply = client.post("/api/v2/chat", json=_body(channel="web"), headers=AUTH).json()["reply"]
+    assert reply == "~~₹2,500~~ ₹2,000"

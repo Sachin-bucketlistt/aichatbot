@@ -41,7 +41,11 @@ class ChatRequest(BaseModel):
     request_id: str | None = Field(
         default=None,
         max_length=256,
-        description="Accepted for forward compatibility (caller's message id); not acted on yet.",
+        description=(
+            "Caller's message id (optional). Used by POST /api/v2/chat for idempotent retries: a repeat of "
+            "the same session_id + request_id within 10 minutes returns the stored reply "
+            "(header Idempotency-Replayed: true) without re-running tools. Ignored by POST /api/chat."
+        ),
     )
 
 class UserInfo(BaseModel):
