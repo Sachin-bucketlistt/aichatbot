@@ -266,3 +266,45 @@ def test_handoff_fallback_reply_gets_a_bubble(monkeypatch):
     _fake_stream(monkeypatch, [_frame(delta="", done=True)])
     body = client.post("/api/v2/chat", json=_body("I want to talk to a human"), headers=AUTH).json()
     assert body["handoff"] and body["messages"] == [body["reply"]]
+
+
+def _sse_frames(text):
+    return [json.loads(line[5:]) for line in text.split("\n\n") if line.startswith("data:")]
+
+
+def test_stream_endpoint_sends_status_deltas_and_one_final_frame(monkeypatch):
+    frames = [
+        _frame(status="Checking availability…", done=False),
+        _frame(delta="Nice! ~~₹2,500~~ ₹2,000", done=False),
+        _frame(delta="\n\nWant slots?", done=False),
+        _frame(delta="", done=True),
+    ]
+    _fake_stream(monkeypatch, frames)
+    r = client.post("/api/v2/chat/stream", json=_body(), headers=AUTH)
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
+    out = _sse_frames(r.text)
+    assert out[0] == {"status": "Checking availability…", "done": False}
+    assert [f["delta"] for f in out if f.get("delta")] == ["Nice! ~~₹2,500~~ ₹2,000", "\n\nWant slots?"]  # raw
+    final = out[-1]
+    assert final["done"] is True and sum(1 for f in out if f["done"]) == 1
+    assert final["reply"] == "Nice! ~₹2,500~ ₹2,000\n\nWant slots?"          # canonical: strike fixed
+    assert final["messages"] == ["Nice! ~₹2,500~ ₹2,000", "Want slots?"]
+    assert final["handoff"] is False and final["error"] is None
+
+
+def test_stream_endpoint_requires_the_key(monkeypatch):
+    _fake_stream(monkeypatch, OK_FRAMES)
+    assert client.post("/api/v2/chat/stream", json=_body()).status_code == 401
+    assert client.post("/api/v2/chat/stream", json=_body(), headers={"Authorization": "Bearer x"}).status_code == 401
+
+
+def test_stream_final_frame_carries_handoff_and_error(monkeypatch):
+    _fake_stream(monkeypatch, [_frame(delta="", done=True, error="boom")])
+    final = _sse_frames(client.post("/api/v2/chat/stream", json=_body("I want a human agent"), headers=AUTH).text)[-1]
+    assert final["handoff"] is True and final["error"] == "boom" and final["reply"]
+
+
+def test_empty_reply_without_error_is_reported_as_an_error(monkeypatch):
+    _fake_stream(monkeypatch, [_frame(delta="", done=True)])
+    body = client.post("/api/v2/chat", json=_body("what is the weather like on mars today"), headers=AUTH).json()
+    assert body["reply"] == "" and body["messages"] == [] and body["error"] == "empty_reply"

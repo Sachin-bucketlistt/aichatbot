@@ -27,6 +27,11 @@ services:
         value: https://mcp.bucketlistt.com/mcp
       - key: MAX_MESSAGES_PER_SESSION
         value: "40"
+      # WhatsApp lets a business reply freely for 24 h after the customer's last message, so keep
+      # the conversation state (history, message count, summary) that long. The bucketlistt login
+      # itself still lasts only 30 min (token_store.TTL_SECONDS), and attachments 2 h.
+      - key: SESSION_TTL_SECONDS
+        value: "86400"
       - key: REDIS_URL
         fromService:
           name: bucky-redis-test

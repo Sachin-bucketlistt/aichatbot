@@ -37,6 +37,7 @@ Local dev: `http://localhost:8000`
 |---|---|---|---|---|
 | `GET` | `/api/health` | Liveness probe, returns configured model | none | no |
 | `POST` | `/api/v2/chat` | **CRM/WhatsApp endpoint:** one JSON reply, handoff and cap flags, idempotent retries | Bearer `CHAT_API_KEY` (required) | yes, 20/min/IP, **skipped with a valid key** |
+| `POST` | `/api/v2/chat/stream` | Same as v2 but streamed (SSE): status and text chunks, then one final frame with the full v2 fields | Bearer `CHAT_API_KEY` (required) | same as v2 |
 | `POST` | `/api/chat` | Send conversation, receive streamed answer (SSE) | Bearer `CHAT_API_KEY` if configured | yes, 20/min/IP, skipped with a valid key |
 | `POST` | `/api/chat/attachments` | Upload one file, get an `attachment_id` | Bearer `CHAT_API_KEY` if configured | no |
 | `POST` | `/api/session/user-info` | Save name/phone/email into a session | Bearer `CHAT_API_KEY` if configured | no |
@@ -472,6 +473,7 @@ This is configuration only, no code change.
 | Variable | Default | Effect |
 |---|---|---|
 | `LLM_MODEL` | `anthropic/claude-sonnet-5-5` | Model used (via litellm) |
+| `SESSION_TTL_SECONDS` | 7200 | Conversation state lifetime. The Render blueprint sets 86400 (24 h) to match WhatsApp's customer-service window. The bucketlistt login lasts 30 min and attachments 2 h regardless |
 | `CHAT_API_KEY` | blank | Bearer key. Blank: `/api/chat` open, `/api/v2/chat` returns 503. Set: required on `/api/v2/chat`, `/api/chat`, `/api/session/user-info` |
 | `CHAT_LIMIT_PER_MINUTE` | 20 | Per-IP limit for requests without a valid key |
 | `CHAT_KEY_LIMIT_PER_MINUTE` | 120 | Combined limit for all requests with a valid key (0 = off) |
@@ -667,7 +669,39 @@ else:
 - The login is stored per `session_id` for 30 minutes and survives a server restart (Redis).
   There is no way yet to skip the OTP by passing a verified phone number from the CRM.
 
-### 12.9 Test deployment notes (Render free tier)
+### 12.9 Streaming variant: `POST /api/v2/chat/stream`
+
+Same request body, auth and rate limits as `/api/v2/chat`, but the answer arrives as Server-Sent
+Events so a gateway can react before the full reply is ready (the website's `/api/chat` works the
+same way). Frames, in order:
+
+```
+data: {"status": "Checking availability…", "done": false}     (0 or more, while tools run)
+data: {"delta": "Nice! ", "done": false}                       (text chunks, raw as the model writes them)
+data: {"done": true, "session_id": "...", "reply": "...", "messages": ["..."], "handoff": false,
+       "handoff_reason": null, "session_capped": false, "error": null}      (exactly one, last)
+```
+
+- **The final frame is the canonical answer.** Its fields are the same as the JSON response of §12.2
+  (WhatsApp strikethrough fixed, `messages` split, handoff and cap flags). Deltas are raw, so they
+  may still contain `~~`. For WhatsApp, normally ignore deltas and use `status` for a typing
+  indicator and the final frame's `messages` for sending.
+- **No idempotency.** `request_id` is ignored here; use the JSON endpoint when you need replay
+  protection.
+- Failures arrive in the final frame (`error` set), never as a dropped stream. 401 and 503 are
+  returned as normal HTTP errors before the stream starts.
+
+```bash
+curl -N -X POST $BASE_URL/api/v2/chat/stream -H "Authorization: Bearer $CHAT_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"wa-test-1","messages":[{"role":"user","content":"bungee price in Rishikesh?"}]}'
+```
+
+If a reply would otherwise be empty with no error (the model returned nothing), both v2 endpoints
+now report `error: "empty_reply"` instead of an empty `reply`, so a gateway never sends a blank
+message. Treat it like any other `error`: retry.
+
+### 12.10 Test deployment notes (Render free tier)
 
 - The service sleeps after 15 minutes without traffic; the first request afterwards can take
   about a minute. Redis does not persist, so a Redis restart logs customers out.

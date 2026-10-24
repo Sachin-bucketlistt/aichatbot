@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 CHAT_LIMIT_PER_MINUTE = settings.chat_limit_per_minute
 KEY_LIMIT_PER_MINUTE = settings.chat_key_limit_per_minute
 CHAT_PATH = "/api/chat"
-CHAT_PATHS = (CHAT_PATH, "/api/v2/chat")
+CHAT_PATHS = (CHAT_PATH, "/api/v2/chat", "/api/v2/chat/stream")
 _KEY_BUCKET = "__valid_key__"
 _MAX_TRACKED = 10_000  # sweep idle buckets past this, so spoofed/rotating IPs can't grow memory forever
 

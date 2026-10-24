@@ -11,6 +11,7 @@ import re
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app import session_store
@@ -99,12 +100,75 @@ async def _store(key: str, result: ChatV2Response) -> None:
         logger.exception("Could not store idempotency result for %s", key)
 
 
-@router.post("/api/v2/chat", response_model=ChatV2Response)
-async def chat_v2(request: ChatRequest, http_request: Request, response: Response) -> ChatV2Response:
+def _require_key(http_request: Request) -> None:
     if not settings.chat_api_key:
         raise HTTPException(503, "CRM chat API not configured (set CHAT_API_KEY)")
     if not has_valid_chat_key(http_request):
         raise HTTPException(401, "Unauthorized")
+
+
+def _make_result(request: ChatRequest, session_id: str, parts: list[str], error: str | None,
+                 capped: bool, handoff_state: dict) -> ChatV2Response:
+    """Turn what stream_chat_response produced into the v2 response (shared by JSON and stream)."""
+    reply = "".join(parts).strip()
+    if (request.channel or "whatsapp") == "whatsapp":
+        reply = _to_whatsapp_strike(reply)
+    last_user = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
+    reason = None if capped else handoff_state.get("reason") or detect_handoff(last_user)
+    if reason and not reply:
+        reply = HANDOFF_FALLBACK_REPLY
+    if not reply and not error:
+        error = "empty_reply"   # never hand the CRM a blank message with no error: it would send it
+    return ChatV2Response(
+        session_id=session_id, reply=reply, messages=_split_messages(reply),
+        handoff=bool(reason), handoff_reason=reason, session_capped=capped, error=error,
+    )
+
+
+def _sse(payload: dict) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+@router.post("/api/v2/chat/stream")
+async def chat_v2_stream(request: ChatRequest, http_request: Request) -> StreamingResponse:
+    """Same as POST /api/v2/chat but streamed (SSE) so a gateway can show progress sooner.
+
+    Frames: {"status": "..."} while tools run, {"delta": "..."} text chunks (raw, as the model
+    writes them), and ONE final {"done": true, ...ChatV2Response fields}, which is the canonical
+    answer (WhatsApp strikethrough fixed, `messages` split, handoff flags). No idempotency here:
+    use the JSON endpoint when you need replay protection.
+    """
+    _require_key(http_request)
+    session_id = request.session_id or str(uuid.uuid4())
+    logger.info("POST /api/v2/chat/stream — %d messages, session=%s", len(request.messages), session_id)
+
+    async def frames():
+        handoff_state: dict = {}
+        parts: list[str] = []
+        error = None
+        capped = False
+        async for frame in stream_chat_response(
+            request.messages, session_id, channel=request.channel or "whatsapp", handoff_state=handoff_state
+        ):
+            payload = json.loads(frame.removeprefix("data: ").strip())
+            if payload.get("done"):
+                error = payload.get("error") or error
+                capped = capped or bool(payload.get("session_capped"))
+                continue
+            if payload.get("delta"):
+                parts.append(payload["delta"])
+                yield _sse({"delta": payload["delta"], "done": False})
+            elif payload.get("status"):
+                yield _sse({"status": payload["status"], "done": False})
+        result = _make_result(request, session_id, parts, error, capped, handoff_state)
+        yield _sse({"done": True, **result.model_dump()})
+
+    return StreamingResponse(frames(), media_type="text/event-stream")
+
+
+@router.post("/api/v2/chat", response_model=ChatV2Response)
+async def chat_v2(request: ChatRequest, http_request: Request, response: Response) -> ChatV2Response:
+    _require_key(http_request)
 
     session_id = request.session_id or str(uuid.uuid4())
     key = f"idem:v2:{session_id}:{request.request_id}" if request.request_id else None
@@ -129,18 +193,7 @@ async def chat_v2(request: ChatRequest, http_request: Request, response: Respons
             error = payload.get("error") or error
             capped = capped or bool(payload.get("session_capped"))
 
-        reply = "".join(parts).strip()
-        if (request.channel or "whatsapp") == "whatsapp":
-            reply = _to_whatsapp_strike(reply)
-        last_user = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
-        reason = None if capped else handoff_state.get("reason") or detect_handoff(last_user)
-        if reason and not reply:
-            reply = HANDOFF_FALLBACK_REPLY
-        result = ChatV2Response(
-            session_id=session_id, reply=reply, messages=_split_messages(reply),
-            handoff=bool(reason), handoff_reason=reason,
-            session_capped=capped, error=error,
-        )
+        result = _make_result(request, session_id, parts, error, capped, handoff_state)
     except BaseException:
         if state == "new":
             await _store(key, ChatV2Response(session_id=session_id, reply="", error="aborted"))

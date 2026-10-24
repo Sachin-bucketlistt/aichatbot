@@ -514,3 +514,44 @@ def test_stream_chat_response_does_not_check_the_cap_without_a_session_id(monkey
     # reaching that (rather than an AssertionError bubbling out of the fake
     # get_message_count) proves the cap check was skipped, not tripped.
     assert any('"done": true' in f for f in frames)
+
+
+# --- an empty final answer must never end a turn silently ------------------
+
+class _EmptyStream:
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise StopAsyncIteration
+
+
+def _drive_loop(monkeypatch, streams):
+    import app.llm as llm
+
+    monkeypatch.setattr(llm, "load_catalog_tools", lambda: _async_return(_FAKE_MCP_TOOLS))
+    calls = []
+
+    async def _fake_acompletion(*_a, **_k):
+        calls.append(1)
+        return streams[min(len(calls), len(streams)) - 1]()
+
+    monkeypatch.setattr(llm.litellm, "acompletion", _fake_acompletion)
+
+    async def _run():
+        return [e async for e in llm._run_tool_loop([{"role": "user", "content": "tell me about rafting please"}])]
+
+    return calls, _run
+
+
+def test_one_empty_model_answer_is_retried_once(monkeypatch):
+    calls, run = _drive_loop(monkeypatch, [_EmptyStream, _ImmediateFinalAnswer])
+    events = asyncio.run(run())
+    assert len(calls) == 2 and ("delta", "hi") in events
+
+
+def test_two_empty_model_answers_raise_instead_of_ending_silently(monkeypatch):
+    calls, run = _drive_loop(monkeypatch, [_EmptyStream])
+    with pytest.raises(RuntimeError, match="empty model response"):
+        asyncio.run(run())
+    assert len(calls) == 2

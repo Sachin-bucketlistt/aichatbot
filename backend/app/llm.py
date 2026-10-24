@@ -504,6 +504,7 @@ async def _run_tool_loop(
     first_iter_tools = [
         t for t in all_tools if t["function"]["name"] != "search_web"
     ] if mcp_tools else all_tools
+    empty_retries = 0
     for iteration in range(MAX_TOOL_ITERATIONS):
         # Force a tool call only when it's actually plausible the message
         # needs the catalog — never for mid-flow/safety-sensitive turns
@@ -553,11 +554,13 @@ async def _run_tool_loop(
         # Consume the stream: yield content deltas in real-time, collect tool
         # calls incrementally so we can execute them after the stream ends.
         full_content = ""
+        finish_reason = None
         tc_parts: dict[int, dict] = {}
         async for chunk in response:
             choices = chunk.choices
             if not choices:
                 continue
+            finish_reason = getattr(choices[0], "finish_reason", None) or finish_reason
             delta = choices[0].delta
             if delta.content:
                 full_content += delta.content
@@ -576,6 +579,18 @@ async def _run_tool_loop(
                             tc_parts[idx]["function"]["arguments"] += tc.function.arguments
 
         logger.info("Tool-loop LLM call #%d took %.3fs (choice=%s)", iteration, time.perf_counter() - t_llm, iter_choice)
+
+        if not tc_parts and not full_content:
+            # No text and no tool call: without this the turn would end silently empty
+            # (the website shows nothing; the CRM would send a blank message).
+            logger.warning(
+                "Empty model response on iteration %d (finish_reason=%s, model=%s)",
+                iteration, finish_reason, settings.llm_model,
+            )
+            if empty_retries < 1:
+                empty_retries += 1
+                continue
+            raise RuntimeError(f"empty model response (finish_reason={finish_reason})")
 
         if not tc_parts:
             logger.info("Tool loop done after %d iterations, streamed %d chars", iteration + 1, len(full_content))
