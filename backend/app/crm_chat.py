@@ -37,9 +37,32 @@ def _to_whatsapp_strike(text: str) -> str:
     return _DOUBLE_TILDE_RE.sub(r"~\1~", text)
 
 
+MAX_BUBBLES = 4
+WHATSAPP_TEXT_LIMIT = 4000   # WhatsApp's hard limit is 4096; leave a little room
+
+
+def _split_messages(reply: str) -> list[str]:
+    """Split a reply into WhatsApp-sized bubbles: one per paragraph (blank-line separated),
+    at most MAX_BUBBLES (the overflow is merged into the last one), none over the text limit.
+    A bullet list with single newlines stays in one bubble."""
+    parts = [p.strip() for p in re.split(r"\n\s*\n", reply) if p.strip()]
+    if len(parts) > MAX_BUBBLES:
+        parts = parts[: MAX_BUBBLES - 1] + ["\n\n".join(parts[MAX_BUBBLES - 1:])]
+    bubbles: list[str] = []
+    for part in parts:
+        while len(part) > WHATSAPP_TEXT_LIMIT:
+            cut = part.rfind("\n", 0, WHATSAPP_TEXT_LIMIT)
+            cut = cut if cut > 0 else WHATSAPP_TEXT_LIMIT
+            bubbles.append(part[:cut].strip())
+            part = part[cut:].strip()
+        bubbles.append(part)
+    return bubbles
+
+
 class ChatV2Response(BaseModel):
     session_id: str
     reply: str
+    messages: list[str] = []   # same text as `reply`, split into short bubbles to send one by one
     handoff: bool = False
     handoff_reason: str | None = None
     session_capped: bool = False
@@ -114,7 +137,8 @@ async def chat_v2(request: ChatRequest, http_request: Request, response: Respons
         if reason and not reply:
             reply = HANDOFF_FALLBACK_REPLY
         result = ChatV2Response(
-            session_id=session_id, reply=reply, handoff=bool(reason), handoff_reason=reason,
+            session_id=session_id, reply=reply, messages=_split_messages(reply),
+            handoff=bool(reason), handoff_reason=reason,
             session_capped=capped, error=error,
         )
     except BaseException:

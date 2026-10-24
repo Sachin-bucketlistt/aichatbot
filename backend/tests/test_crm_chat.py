@@ -61,7 +61,7 @@ def test_json_contract_and_default_channel(monkeypatch):
     r = client.post("/api/v2/chat", json=_body(), headers=AUTH)
     assert r.status_code == 200
     assert r.json() == {
-        "session_id": "wa-1-1", "reply": "Hello there", "handoff": False,
+        "session_id": "wa-1-1", "reply": "Hello there", "messages": ["Hello there"], "handoff": False,
         "handoff_reason": None, "session_capped": False, "error": None,
     }
     assert calls == ["whatsapp"]
@@ -245,3 +245,24 @@ def test_strikethrough_left_alone_on_other_channels(monkeypatch):
     _fake_stream(monkeypatch, frames)
     reply = client.post("/api/v2/chat", json=_body(channel="web"), headers=AUTH).json()["reply"]
     assert reply == "~~₹2,500~~ ₹2,000"
+
+
+def test_reply_is_split_into_bubbles_by_paragraph():
+    from app.crm_chat import _split_messages
+    reply = "Nice one!\n\nHere are the prices:\n- A: ₹1\n- B: ₹2\n\nWant me to check slots?"
+    assert _split_messages(reply) == ["Nice one!", "Here are the prices:\n- A: ₹1\n- B: ₹2", "Want me to check slots?"]
+
+
+def test_bubbles_capped_at_four_and_length_limited():
+    from app.crm_chat import _split_messages, MAX_BUBBLES, WHATSAPP_TEXT_LIMIT
+    many = _split_messages("\n\n".join(f"p{i}" for i in range(7)))
+    assert len(many) == MAX_BUBBLES and many[-1] == "p3\n\np4\n\np5\n\np6"
+    long = _split_messages("\n".join("x" * 100 for _ in range(60)))   # one 6000-char paragraph
+    assert len(long) == 2 and all(len(b) <= WHATSAPP_TEXT_LIMIT for b in long)
+    assert _split_messages("") == []
+
+
+def test_handoff_fallback_reply_gets_a_bubble(monkeypatch):
+    _fake_stream(monkeypatch, [_frame(delta="", done=True)])
+    body = client.post("/api/v2/chat", json=_body("I want to talk to a human"), headers=AUTH).json()
+    assert body["handoff"] and body["messages"] == [body["reply"]]

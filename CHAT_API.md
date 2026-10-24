@@ -547,6 +547,7 @@ never in a browser or mobile app.
 {
   "session_id": "wa-919876543210-1",
   "reply": "Here are the main single-jump prices in Rishikesh...",
+  "messages": ["Here are the main single-jump prices in Rishikesh.", "Want me to check slots for your date?"],
   "handoff": false,
   "handoff_reason": null,
   "session_capped": false,
@@ -558,6 +559,7 @@ never in a browser or mobile app.
 |---|---|---|
 | `session_id` | string | Echo of the session used. |
 | `reply` | string | Text to send to the customer, already WhatsApp-formatted. Empty when `error` is set. Split at 4096 chars if needed. |
+| `messages` | string[] | The same text as `reply`, split into short WhatsApp-sized bubbles: one per paragraph, at most 4 (extra paragraphs are merged into the last), none over 4000 chars, and a bullet list stays in one bubble. **Send these one by one, in order, instead of `reply`**, ideally with a typing indicator and a short pause (about 1 to 3 s) before each. Empty when `reply` is empty. Older clients can keep using `reply`; the text is identical. |
 | `handoff` | bool | `true`: queue the conversation for a human and stop calling the bot until an agent hands it back. `reply` then holds a short "connecting you to our team" message, which you should deliver. |
 | `handoff_reason` | string \| null | `customer_requested_human`, `cannot_answer`, `complaint`, `payment_issue`, `booking_change` or `other`. Advisory only: it is set by the model or by a keyword check on the customer's last message. |
 | `session_capped` | bool | `true`: the session hit its message cap. **Do not show `reply`.** Start a new `session_id` and resend the same customer message. |
@@ -606,8 +608,12 @@ discards the login (§12.8).
 
 ### 12.6 Message formatting
 
-With `channel: "whatsapp"` the model is told not to use tables, headings or Markdown links, to use
-WhatsApp syntax and to keep replies short. Real output from the test deployment:
+With `channel: "whatsapp"` the model is told to text like a person: answer first in 1 to 3 short
+sentences, match the length of the customer's message, put a blank line between thoughts (each
+paragraph becomes one entry in `messages`), use a bullet list only when prices or options were
+asked for, aim for under about 400 characters (800 at most unless a full price list was asked
+for), and end with at most one short question. It is also told never to use tables, headings or
+Markdown links, and to use WhatsApp syntax. Real output from the test deployment:
 
 ```
 *Thrill Factory* (54-55m)

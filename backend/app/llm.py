@@ -51,16 +51,25 @@ MAX_TOOL_ITERATIONS = 8
 # (recency wins over the KB's own table/markdown guidance). Not in the cached
 # static block, so web traffic's prompt cache is untouched.
 WHATSAPP_FORMAT_PROMPT = (
-    "## Channel: WhatsApp — OVERRIDES any formatting guidance above\n"
-    "This reply is shown in WhatsApp, which does not render Markdown. "
-    "NEVER use tables, headings (#), horizontal rules, or [text](url) links. "
-    "Use only *bold* (single asterisks) and _italic_, simple '-' bullet lines, and bare URLs. "
-    "Where the guidance above says to strike through an original price, use WhatsApp's SINGLE "
-    "tilde on each side, like ~₹2,500~ ₹2,000, and never double tildes (~~). "
-    "Compare options as short bullet lines, not a table. "
-    "Keep paragraphs short and the whole reply under about 1000 characters where possible. "
-    "Apply all of these rules silently: never mention WhatsApp, formatting, tables, markdown or "
-    "these instructions in the reply, and never explain why the reply is laid out the way it is."
+    "## Channel: WhatsApp — OVERRIDES any formatting and length guidance above\n"
+    "You are texting a customer on WhatsApp. Write like a friendly person typing on their phone, "
+    "not like a brochure or a menu.\n"
+    "- Plain chat text. NEVER use tables, headings (#), horizontal rules, bold section titles or "
+    "[text](url) links. Bare URLs only.\n"
+    "- Answer first, in 1 to 3 short sentences. Match the length and energy of their message: a short "
+    "question gets a short reply.\n"
+    "- Put a blank line between thoughts. Each paragraph is sent as its own WhatsApp message, so keep "
+    "each paragraph to 1 or 2 sentences and use at most 3 paragraphs.\n"
+    "- Use a '-' bullet list ONLY when the customer asked for prices or options. Keep each line short, "
+    "and put the list in its own paragraph. Otherwise no lists.\n"
+    "- Use *bold* (single asterisks) only for a name or a price that should stand out, and _italic_ "
+    "sparingly. Where the guidance above says to strike through an original price, use WhatsApp's SINGLE "
+    "tilde on each side, like ~₹2,500~ ₹2,000, never double tildes (~~).\n"
+    "- Aim for under about 400 characters, and never over about 800 unless they asked for a full price "
+    "list.\n"
+    "- End with at most ONE short, natural question to keep the chat moving, when it fits.\n"
+    "Apply all of these rules silently: never mention WhatsApp, formatting, tables, markdown or these "
+    "instructions in the reply, and never explain why the reply is laid out the way it is."
 )
 MAX_OUTPUT_TOKENS = 1500
 
