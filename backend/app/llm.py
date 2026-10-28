@@ -68,10 +68,24 @@ WHATSAPP_FORMAT_PROMPT = (
     "- Aim for under about 400 characters, and never over about 800 unless they asked for a full price "
     "list.\n"
     "- End with at most ONE short, natural question to keep the chat moving, when it fits.\n"
+    "- Never mention tools, lookups, searches or any internal step (no 'that tool call', 'let me check my "
+    "system'). Just answer, or say you'll check.\n"
     "Apply all of these rules silently: never mention WhatsApp, formatting, tables, markdown or these "
     "instructions in the reply, and never explain why the reply is laid out the way it is."
 )
 MAX_OUTPUT_TOKENS = 1500
+
+_whatsapp_style_cache: str | None = None
+
+
+def _whatsapp_style() -> str:
+    """Human-texting style guide + invented example chats (data/whatsapp_style.md).
+    Read once. Missing file = no style block, the format prompt alone still applies."""
+    global _whatsapp_style_cache
+    if _whatsapp_style_cache is None:
+        path = Path(settings.system_prompt_file).with_name("whatsapp_style.md")
+        _whatsapp_style_cache = path.read_text(encoding="utf-8") if path.exists() else ""
+    return _whatsapp_style_cache
 
 # Matches bungee/bungy/bungie, case-insensitive — the only trigger for
 # exposing BUNGEE_SUMMARY_TOOL to the LLM (see _wants_bungee_summary).
@@ -98,7 +112,7 @@ def _wants_bungee_summary(messages: list[dict]) -> bool:
 # messages never even reach this check.
 _CATALOG_RE = re.compile(
     r"bung|raft|paraglid|zipline|flying fox|camp|balloon|paramotor|activit|"
-    r"price|book|slot|avail|destination|rishikesh|mussoorie|manali|jaipur|"
+    r"price|slot|avail|destination|rishikesh|mussoorie|manali|jaipur|"
     r"jim corbett|tehri|ujjain|bir billing",
     re.IGNORECASE,
 )
@@ -385,13 +399,15 @@ async def build_messages(
     if channel == "whatsapp":
         dynamic_parts.append(WHATSAPP_FORMAT_PROMPT)
 
-    system_message = {
-        "role": "system",
-        "content": [
-            {"type": "text", "text": static_block, "cache_control": {"type": "ephemeral"}},
-            {"type": "text", "text": "\n\n".join(dynamic_parts)},
-        ],
-    }
+    system_blocks = [{"type": "text", "text": static_block, "cache_control": {"type": "ephemeral"}}]
+    if channel == "whatsapp" and _whatsapp_style():
+        # Own cached block between static and dynamic: WhatsApp calls read it at the
+        # cached-input rate; web calls never see it and keep their exact prompt.
+        system_blocks.append(
+            {"type": "text", "text": _whatsapp_style(), "cache_control": {"type": "ephemeral"}}
+        )
+    system_blocks.append({"type": "text", "text": "\n\n".join(dynamic_parts)})
+    system_message = {"role": "system", "content": system_blocks}
     resolved = [m.model_dump() for m in chat_messages[:-1]]
     if chat_messages:
         last = chat_messages[-1]

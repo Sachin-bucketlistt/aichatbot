@@ -555,3 +555,8 @@ def test_two_empty_model_answers_raise_instead_of_ending_silently(monkeypatch):
     with pytest.raises(RuntimeError, match="empty model response"):
         asyncio.run(run())
     assert len(calls) == 2
+
+
+def test_howto_book_question_does_not_force_a_catalog_call():
+    assert not _wants_catalog([{"role": "user", "content": "How do I book?"}])
+    assert _wants_catalog([{"role": "user", "content": "book bungee for saturday"}])

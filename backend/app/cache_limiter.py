@@ -14,7 +14,6 @@ def _enforce_cache_limits(messages: list[dict]) -> list[dict]:
             for block in content:
                 if isinstance(block, dict) and "cache_control" in block:
                     cache_allowance -= 1
-                    break
 
     for msg in reversed(msgs[1:] if msgs and msgs[0].get("role") == "system" else msgs):
         content = msg.get("content")

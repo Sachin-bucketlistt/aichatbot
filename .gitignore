@@ -36,3 +36,8 @@ graphify-out/
 AGENTS.md
 .agents/
 
+
+# Customer WhatsApp chat exports: personal data (phone numbers, names). Never commit.
+whatsapp chat dataset/
+whatsapp*chat*dataset*
+*.chats.json

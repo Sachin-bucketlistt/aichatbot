@@ -68,7 +68,7 @@ def test_whatsapp_channel_adds_format_prompt_and_web_does_not():
     msgs = [ChatMessage(role="user", content="hello")]
     wa = asyncio.run(llm_module.build_messages(msgs, channel="whatsapp"))
     web = asyncio.run(llm_module.build_messages(msgs))
-    wa_dyn, web_dyn = wa[0]["content"][1]["text"], web[0]["content"][1]["text"]
+    wa_dyn, web_dyn = wa[0]["content"][-1]["text"], web[0]["content"][-1]["text"]
     assert "WhatsApp" in wa_dyn and "WhatsApp" not in web_dyn
     assert wa[0]["content"][0] == web[0]["content"][0]  # cached static block unchanged
 
@@ -84,3 +84,32 @@ def test_session_capped_flag_on_cap_reply(monkeypatch):
 
     frames = [json.loads(f[6:]) for f in asyncio.run(run())]
     assert frames[-1] == {"delta": "", "done": True, "session_capped": True}
+
+
+def test_whatsapp_style_block_is_cached_and_web_never_gets_it():
+    msgs = [ChatMessage(role="user", content="hello")]
+    wa = asyncio.run(llm_module.build_messages(msgs, channel="whatsapp"))[0]["content"]
+    web = asyncio.run(llm_module.build_messages(msgs))[0]["content"]
+    assert len(wa) == 3 and wa[1]["cache_control"] == {"type": "ephemeral"}
+    assert "real customer chats" in wa[1]["text"] and len(web) == 2
+
+
+def test_style_file_and_repo_hold_no_customer_personal_data():
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    style = (root / "backend/data/whatsapp_style.md").read_text(encoding="utf-8")
+    assert not re.search(r"\d[\d\s-]{7,}\d|\+91|@|https?://|₹|\bRs\b", style)  # no numbers, emails, links, prices
+    ignore = (root / ".gitignore").read_text()
+    assert "whatsapp chat dataset/" in ignore
+
+
+def test_cache_limiter_counts_every_system_breakpoint():
+    from app.cache_limiter import _enforce_cache_limits
+    cc = {"type": "ephemeral"}
+    msgs = [{"role": "system", "content": [{"type": "text", "text": "a", "cache_control": cc},
+                                           {"type": "text", "text": "b", "cache_control": cc}]}]
+    msgs += [{"role": "tool", "content": [{"type": "text", "text": str(i), "cache_control": cc}]} for i in range(4)]
+    out = _enforce_cache_limits(msgs)
+    total = sum("cache_control" in b for m in out for b in m["content"])
+    assert total == 4
