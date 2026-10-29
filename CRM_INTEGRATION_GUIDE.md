@@ -166,3 +166,24 @@ we will share measured numbers after a load test, until then keep CRM concurrenc
 2. Confirmation that you will rotate `session_id` only on `session_capped`.
 3. Your intent/sentiment value list if you want those labels.
 4. Your outbound IPs if you want us to allow-list them additionally.
+
+
+## 9. Welcome message (recommended)
+
+Send this **once, when a new customer conversation starts**, before Bucky's first reply. Do not
+resend it when you rotate `session_id` after `session_capped`, and do not send it again within the
+same conversation. It tells the customer who they are chatting with, so Prachi's later replies
+don't need to explain themselves, and it makes a human easy to reach.
+
+English:
+
+> Hi, I'm Prachi from bucketlistt 🙂 I'm the team's virtual assistant here on WhatsApp, and a teammate can take over anytime, just ask.
+
+Hinglish:
+
+> Hi, main Prachi hoon, bucketlistt se 🙂 Main team ki virtual assistant hoon, aur zaroorat ho toh koi teammate kabhi bhi aapse baat kar sakta hai, bas bol dijiye.
+
+Pick the language from the customer's first message. The text has no question on purpose: the
+bot's own first reply asks what they want to do. The bot does not introduce itself by name unless
+asked, because this message already did. If you change the persona name (`WHATSAPP_PERSONA_NAME`),
+change the name here too.
