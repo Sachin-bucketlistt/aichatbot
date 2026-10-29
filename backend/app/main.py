@@ -98,7 +98,11 @@ async def chat(request: ChatRequest, http_request: Request) -> StreamingResponse
         session_id,
     )
     response = StreamingResponse(
-        stream_chat_response(request.messages, session_id, channel=request.channel),
+        # The WhatsApp persona/format is for the trusted CRM only: an anonymous web caller cannot opt in.
+        stream_chat_response(
+            request.messages, session_id,
+            channel=request.channel if has_valid_chat_key(http_request) else None,
+        ),
         media_type="text/event-stream",
     )
     # ponytail: secure mirrors the scheme uvicorn itself sees — if this ever

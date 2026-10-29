@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import llm as llm_module
+from app import main as main_module
 from app.config import settings
 from app.main import app
 from app.rate_limit import CHAT_LIMIT_PER_MINUTE, _hits
@@ -70,7 +71,7 @@ def test_whatsapp_channel_adds_format_prompt_and_web_does_not():
     web = asyncio.run(llm_module.build_messages(msgs))
     wa_dyn, web_dyn = wa[0]["content"][-1]["text"], web[0]["content"][-1]["text"]
     assert "WhatsApp" in wa_dyn and "WhatsApp" not in web_dyn
-    assert wa[0]["content"][0] == web[0]["content"][0]  # cached static block unchanged
+    assert "Bucky" in web[0]["content"][0]["text"]  # web keeps its own persona
 
 
 def test_session_capped_flag_on_cap_reply(monkeypatch):
@@ -113,3 +114,39 @@ def test_cache_limiter_counts_every_system_breakpoint():
     out = _enforce_cache_limits(msgs)
     total = sum("cache_control" in b for m in out for b in m["content"])
     assert total == 4
+
+
+def test_female_persona_is_whatsapp_only(monkeypatch):
+    monkeypatch.setattr(settings, "whatsapp_persona_name", "Prachi")
+    llm_module._whatsapp_style_cache = None
+    msgs = [ChatMessage(role="user", content="hello")]
+    wa = asyncio.run(llm_module.build_messages(msgs, channel="whatsapp"))[0]["content"]
+    web = asyncio.run(llm_module.build_messages(msgs))[0]["content"]
+    other = asyncio.run(llm_module.build_messages(msgs, channel="telegram"))[0]["content"]
+    wa_text = " ".join(b["text"] for b in wa)
+    assert "Prachi" in wa_text and "Bucky" not in wa_text and "{name}" not in wa_text
+    for blocks in (web, other):  # website and unknown channels never see the persona
+        text = " ".join(b["text"] for b in blocks)
+        assert "Prachi" not in text and "feminine" not in text and "Bucky" in text
+
+
+def test_persona_never_claims_to_be_human_and_answers_honestly():
+    from pathlib import Path
+    persona = (Path(__file__).resolve().parents[1] / "data/whatsapp_persona.md").read_text(encoding="utf-8")
+    assert "Never say or imply that you are a human" in persona
+    assert "sincerely asks whether you are a bot" in persona and "tell the truth" in persona
+
+
+def test_anonymous_web_caller_cannot_select_whatsapp_channel(monkeypatch):
+    seen = {}
+
+    async def spy(_msgs, _sid=None, channel=None, handoff_state=None):
+        seen["channel"] = channel
+        yield 'data: {"delta": "", "done": true}\n\n'
+
+    monkeypatch.setattr(main_module, "stream_chat_response", spy)
+    client.post("/api/chat", json={**PAYLOAD, "channel": "whatsapp"})
+    assert seen["channel"] is None
+    monkeypatch.setattr(settings, "chat_api_key", "s3cret")
+    client.post("/api/chat", json={**PAYLOAD, "channel": "whatsapp"}, headers={"Authorization": "Bearer s3cret"})
+    assert seen["channel"] == "whatsapp"

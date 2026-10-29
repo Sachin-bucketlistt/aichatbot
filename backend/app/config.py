@@ -22,6 +22,7 @@ Key settings:
     CHAT_KEY_LIMIT_PER_MINUTE — combined limit for all requests with a valid key, default 120 (0 = off)
     TRUSTED_PROXY_HOPS     — reverse proxies appending to X-Forwarded-For, default 1 (client IP is
                              taken that many entries from the right; 0 = ignore the header)
+    WHATSAPP_PERSONA_NAME  — first name of the WhatsApp-only female persona (channel="whatsapp"), default Prachi
     DOCS_ENABLED           — true to keep /docs and /openapi.json when CHAT_API_KEY is set, default false
     DASHBOARD_API_KEY      — bearer token guarding GET /api/admin/session-summaries (optional,
                              endpoints return 503 if unset — see app/dashboard.py)
@@ -76,6 +77,8 @@ class Settings(BaseSettings):
     # The client IP is the entry that many places from the RIGHT (the left side is
     # caller-controlled and spoofable). 0 = ignore the header, use the socket address.
     trusted_proxy_hops: int = 1
+    # The WhatsApp-only persona's name (data/whatsapp_persona.md). The website chat never uses it.
+    whatsapp_persona_name: str = "Prachi"
     # /docs, /redoc and /openapi.json are hidden when CHAT_API_KEY is set, unless this is true.
     docs_enabled: bool = False
     # Employee-dashboard session summaries — see app/dashboard.py. Idle-scan

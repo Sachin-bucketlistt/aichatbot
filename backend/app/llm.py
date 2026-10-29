@@ -87,13 +87,20 @@ _whatsapp_style_cache: str | None = None
 
 
 def _whatsapp_style() -> str:
-    """Human-texting style guide + invented example chats (data/whatsapp_style.md).
-    Read once. Missing file = no style block, the format prompt alone still applies."""
+    """WhatsApp-only persona (data/whatsapp_persona.md) + human texting style
+    (data/whatsapp_style.md), with the persona's name filled in. Read once.
+    Missing files = no block; the format prompt alone still applies."""
     global _whatsapp_style_cache
     if _whatsapp_style_cache is None:
-        path = Path(settings.system_prompt_file).with_name("whatsapp_style.md")
-        _whatsapp_style_cache = path.read_text(encoding="utf-8") if path.exists() else ""
+        folder = Path(settings.system_prompt_file).parent
+        parts = [
+            (folder / name).read_text(encoding="utf-8")
+            for name in ("whatsapp_persona.md", "whatsapp_style.md")
+            if (folder / name).exists()
+        ]
+        _whatsapp_style_cache = "\n\n".join(parts).replace("{name}", settings.whatsapp_persona_name)
     return _whatsapp_style_cache
+
 
 # Matches bungee/bungy/bungie, case-insensitive — the only trigger for
 # exposing BUNGEE_SUMMARY_TOOL to the LLM (see _wants_bungee_summary).
@@ -407,6 +414,9 @@ async def build_messages(
     if channel == "whatsapp":
         dynamic_parts.append(WHATSAPP_FORMAT_PROMPT)
 
+    if channel == "whatsapp":
+        # The female WhatsApp persona replaces the website's "Bucky" name; web never takes this branch.
+        static_block = static_block.replace("Bucky", settings.whatsapp_persona_name)
     system_blocks = [{"type": "text", "text": static_block, "cache_control": {"type": "ephemeral"}}]
     if channel == "whatsapp" and _whatsapp_style():
         # Own cached block between static and dynamic: WhatsApp calls read it at the
