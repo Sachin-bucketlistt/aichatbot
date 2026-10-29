@@ -3,7 +3,7 @@
 # .github/workflows/ci-cd.yml. For local dev, use docker-compose.yml (which
 # builds from source).
 #
-# The image owner is your GitHub username/org — replace `darsh-del` below if
+# The image owner is your GitHub username/org — replace `sachin-bucketlistt` below if
 # the repo moves. Images are tagged :latest by CI; pin to a :<sha> tag here to
 # roll back to a specific build.
 services:
@@ -48,7 +48,7 @@ services:
     restart: unless-stopped
 
   backend:
-    image: ghcr.io/darsh-del/aichatbot-backend:latest
+    image: ghcr.io/sachin-bucketlistt/aichatbot-backend:latest
     env_file: ./backend/.env
     environment:
       WEAVIATE_URL: http://weaviate:8080
@@ -64,7 +64,7 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ghcr.io/darsh-del/aichatbot-frontend:latest
+    image: ghcr.io/sachin-bucketlistt/aichatbot-frontend:latest
     expose:
       - "80"
     depends_on:

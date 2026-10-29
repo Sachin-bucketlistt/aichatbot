@@ -87,7 +87,7 @@ Run the entire application stack (Weaviate + Backend + Frontend) with Docker:
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/darsh-del/aichatbot.git
+   git clone https://github.com/Sachin-bucketlistt/aichatbot.git
    cd aichatbot
    ```
 
