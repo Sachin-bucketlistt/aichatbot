@@ -54,8 +54,9 @@ MAX_TOOL_ITERATIONS = 8
 # process so later turns skip the doomed request instead of paying a failed round trip every time.
 _forced_choice_rejected: set[str] = set()
 
-# A price in a draft reply. Used to catch "answered from memory" on catalog questions.
-_PRICE_RE = re.compile(r"₹\s?\d|\brs\.?\s?\d|\binr\s?\d|\d[\d,]*\s?(?:rs|rupees|inr)\b", re.IGNORECASE)
+# A price in a draft reply. Used to catch "answered from memory" on catalog questions. The (?<![\d,]) keeps
+# a long run of digits from being re-scanned from every position (quadratic: 800 ms at 8,000 digits).
+_PRICE_RE = re.compile(r"₹\s?\d|\brs\.?\s?\d|\binr\s?\d|(?<![\d,])\d[\d,]*\s?(?:rs|rupees|inr)\b", re.IGNORECASE)
 
 # WhatsApp + logged-in only (see build_messages): offer the customer a choice at checkout.
 # Recency beats the static "you cannot take payment" lines, which still hold for the web chat.

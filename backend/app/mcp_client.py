@@ -235,7 +235,7 @@ _DROP_KEYS = {
     "bucketlisttSeasonalClosures",
 }
 _HTML_KEYS = {"description", "highlights", "inclusion", "exclusion", "subtitle", "eligibility"}
-_HTML_RE = re.compile(r"<[^>]+>")
+_HTML_RE = re.compile(r"<[^<>]+>")   # not [^>]+: a long run of "<" with no ">" was quadratic
 # Longer limit for fields that carry critical differentiating info (inclusions, descriptions).
 _HTML_TRUNC_LONG = 800
 _HTML_TRUNC_SHORT = 300

@@ -29,7 +29,9 @@ REGION_STYLES = {
     ),
 }
 
-_TAG_RE = re.compile(r"\s*[(\[]\s*(" + "|".join(REGION_STYLES) + r")\s*[)\]]", re.IGNORECASE)
+# No leading \s*: an unanchored search with it re-scans a long run of spaces from every start, which is
+# quadratic (180 ms at the 8,000-char message limit). split_region_tag strips the leftover spaces instead.
+_TAG_RE = re.compile(r"[(\[]\s*(" + "|".join(REGION_STYLES) + r")\s*[)\]]", re.IGNORECASE)
 
 
 def split_region_tag(text: str) -> tuple[str, str | None]:
