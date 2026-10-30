@@ -178,6 +178,28 @@ async def save_verified_phone(session_id: str, phone: str) -> None:
         logger.error(f"Failed to save verified phone: {e}")
 
 
+async def save_region(session_id: str, region: str) -> None:
+    """Remember the first-message state tag so the reply language survives a trimmed history."""
+    if not redis_client or not session_id:
+        return
+    try:
+        key = f"session:{session_id}"
+        await redis_client.hset(key, "region", region)
+        await redis_client.expire(key, settings.session_ttl_seconds)
+    except Exception as e:
+        logger.error(f"Failed to save region: {e}")
+
+
+async def get_region(session_id: str) -> str | None:
+    if not redis_client or not session_id:
+        return None
+    try:
+        return await redis_client.hget(f"session:{session_id}", "region")
+    except Exception as e:
+        logger.error(f"Failed to read region: {e}")
+        return None
+
+
 async def find_idle_sessions(idle_seconds: int) -> list[str]:
     """Session ids idle >= idle_seconds, with at least one turn, not yet
     summarized. Used by the dashboard idle-scan loop (see app/dashboard.py)

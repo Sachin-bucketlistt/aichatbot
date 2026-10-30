@@ -28,6 +28,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 from app.mcp_client import ALLOWED_TOOLS as MCP_ALLOWED_TOOLS
 from app.mcp_client import BUNGEE_SUMMARY_TOOL, PAYMENT_TOOL, _DotDict, call_catalog_tool, load_catalog_tools
+from app.region import REGION_STYLES, region_from_messages, region_prompt
 from app.retriever import retrieve
 from app.schemas import ChatMessage
 from app.attachments import resolve_attachment
@@ -41,7 +42,7 @@ from app.token_store import (
 from app.tools import TOOL_SCHEMAS, dispatch_tool
 from app.session_store import (
     save_turn, should_prompt_login, mark_login_prompted, should_nudge_for_contact,
-    save_verified_phone, get_message_count, mask_session_id,
+    save_verified_phone, get_message_count, mask_session_id, save_region, get_region,
 )
 from app.stream_sanitizer import StreamSanitizer
 
@@ -397,6 +398,18 @@ async def build_messages(
     if settings.mcp_server_url:
         static_block += LIVE_CATALOG_TOOLS_PROMPT
 
+    # State tag on the first message ("... (GJ)"): WhatsApp only. Strip it from what the model sees and
+    # remember it, so the language holds even if the CRM later trims the history.
+    region = None
+    if channel == "whatsapp":
+        chat_messages, region = region_from_messages(chat_messages)
+        if region and session_id:
+            await save_region(session_id, region)
+        elif session_id:
+            region = await get_region(session_id)
+        if region not in REGION_STYLES:
+            region = None
+
     # --- DYNAMIC block: everything that varies per call. Never mark this
     # cacheable — doing so would defeat the cache by changing the very prefix
     # it's supposed to match. ---
@@ -484,6 +497,8 @@ async def build_messages(
         dynamic_parts.append(PAYMENT_CHOICE_PROMPT)
     if channel == "whatsapp":
         dynamic_parts.append(WHATSAPP_FORMAT_PROMPT)
+    if region:
+        dynamic_parts.append(region_prompt(region))
 
     if channel == "whatsapp":
         # The female WhatsApp persona replaces the website's "Bucky" name; web never takes this branch.
