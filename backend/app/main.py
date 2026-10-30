@@ -18,7 +18,7 @@ from app.llm import stream_chat_response
 from app.mcp_client import close_http_client
 from app.rate_limit import RateLimitMiddleware, has_valid_chat_key
 from app.schemas import ChatRequest, UserInfoRequest, AttachmentUploadResponse
-from app.session_store import init_redis, close_redis, save_user_info
+from app.session_store import init_redis, close_redis, save_user_info, mask_session_id
 from app.attachments import store_attachment, AttachmentError
 from fastapi import UploadFile, File
 
@@ -126,7 +126,7 @@ async def store_user_info(request: UserInfoRequest, http_request: Request) -> di
     if not request.session_id:
         return {"status": "error", "message": "No session ID provided"}
         
-    logger.info("POST /api/session/user-info — session=%s", request.session_id)
+    logger.info("POST /api/session/user-info — session=%s", mask_session_id(request.session_id))
     await save_user_info(
         request.session_id,
         request.user_info.name,
@@ -160,7 +160,7 @@ def get_session_summaries(http_request: Request, since: str | None = None) -> di
 @app.get("/api/admin/session-summaries/{session_id}")
 def get_session_summary(session_id: str, http_request: Request) -> dict:
     _check_dashboard_auth(http_request)
-    logger.info("GET /api/admin/session-summaries/%s", session_id)
+    logger.info("GET /api/admin/session-summaries/%s", mask_session_id(session_id))
     record = get_summary(session_id)
     if record is None:
         raise HTTPException(404, "No summary for this session (not yet idle-summarized, or unknown id)")

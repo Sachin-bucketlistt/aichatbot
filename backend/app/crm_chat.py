@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app import session_store
+from app.session_store import mask_session_id
 from app.config import settings
 from app.handoff import detect_handoff
 from app.llm import stream_chat_response
@@ -140,7 +141,7 @@ async def chat_v2_stream(request: ChatRequest, http_request: Request) -> Streami
     """
     _require_key(http_request)
     session_id = request.session_id or str(uuid.uuid4())
-    logger.info("POST /api/v2/chat/stream — %d messages, session=%s", len(request.messages), session_id)
+    logger.info("POST /api/v2/chat/stream — %d messages, session=%s", len(request.messages), mask_session_id(session_id))
 
     async def frames():
         handoff_state: dict = {}
@@ -151,6 +152,8 @@ async def chat_v2_stream(request: ChatRequest, http_request: Request) -> Streami
             request.messages, session_id, channel=request.channel or "whatsapp", handoff_state=handoff_state
         ):
             payload = json.loads(frame.removeprefix("data: ").strip())
+            if payload.get("status"):
+                parts.clear()   # a status frame means a tool round started: text so far was a "let me check" preamble
             if payload.get("done"):
                 error = payload.get("error") or error
                 capped = capped or bool(payload.get("session_capped"))
@@ -179,7 +182,7 @@ async def chat_v2(request: ChatRequest, http_request: Request, response: Respons
         response.headers["Idempotency-Replayed"] = "true"
         return ChatV2Response.model_validate_json(stored)
 
-    logger.info("POST /api/v2/chat — %d messages, session=%s", len(request.messages), session_id)
+    logger.info("POST /api/v2/chat — %d messages, session=%s", len(request.messages), mask_session_id(session_id))
     handoff_state: dict = {}
     parts: list[str] = []
     error = None
@@ -189,6 +192,8 @@ async def chat_v2(request: ChatRequest, http_request: Request, response: Respons
             request.messages, session_id, channel=request.channel or "whatsapp", handoff_state=handoff_state
         ):
             payload = json.loads(frame.removeprefix("data: ").strip())
+            if payload.get("status"):
+                parts.clear()   # drop the model's pre-tool preamble: the customer should get only the final answer
             parts.append(payload.get("delta") or "")
             error = payload.get("error") or error
             capped = capped or bool(payload.get("session_capped"))

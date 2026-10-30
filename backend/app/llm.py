@@ -41,7 +41,7 @@ from app.token_store import (
 from app.tools import TOOL_SCHEMAS, dispatch_tool
 from app.session_store import (
     save_turn, should_prompt_login, mark_login_prompted, should_nudge_for_contact,
-    save_verified_phone, get_message_count,
+    save_verified_phone, get_message_count, mask_session_id,
 )
 from app.stream_sanitizer import StreamSanitizer
 
@@ -778,7 +778,7 @@ async def stream_chat_response(
             # capped-out session from still paying for a model round-trip.
             logger.info(
                 "Session %s hit the %d-message cap; declining without an LLM call",
-                session_id, settings.max_messages_per_session,
+                mask_session_id(session_id), settings.max_messages_per_session,
             )
             yield _sse({
                 "delta": (
@@ -792,7 +792,7 @@ async def stream_chat_response(
             return
 
         t0 = time.perf_counter()
-        nudge_contact = bool(session_id) and await should_nudge_for_contact(session_id)
+        nudge_contact = bool(session_id) and channel != "whatsapp" and await should_nudge_for_contact(session_id)
         messages = await build_messages(
             chat_messages, session_id, nudge_contact, channel, handoff_enabled=handoff_state is not None
         )
@@ -822,7 +822,7 @@ async def stream_chat_response(
         full_assistant_msg = "".join(assistant_content)
         if session_id:
             await save_turn(session_id, user_msg, full_assistant_msg)
-            if await should_prompt_login(session_id):
+            if channel != "whatsapp" and await should_prompt_login(session_id):
                 yield _sse({"prompt_login": True, "done": False})
                 await mark_login_prompted(session_id)
 
