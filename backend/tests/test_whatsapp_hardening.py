@@ -130,8 +130,8 @@ def test_plain_reply_without_tools_is_unchanged(monkeypatch):
 # --- 5. phone numbers in session ids never reach logs ----------------------------------------
 
 def test_mask_session_id():
-    assert mask_session_id("wa-919876543210-1") == "wa-********3210-1"
-    assert mask_session_id("3f2a-uuid") == "3f2a-uuid" and mask_session_id(None) == ""
+    assert mask_session_id(None) == "" and mask_session_id("") == ""
+    assert "919876543210" not in mask_session_id("wa-919876543210-1")
 
 
 def test_v2_logs_do_not_contain_the_phone_number(monkeypatch, caplog):
@@ -141,7 +141,7 @@ def test_v2_logs_do_not_contain_the_phone_number(monkeypatch, caplog):
                     headers=AUTH)
         client.post("/api/v2/chat/stream", json={"messages": [{"role": "user", "content": "hi"}],
                     "session_id": "wa-919876543210-2"}, headers=AUTH)
-    assert "919876543210" not in caplog.text and "3210" in caplog.text
+    assert "919876543210" not in caplog.text and "3210" not in caplog.text and "sid-" in caplog.text
 
 
 # --- 4. extra-discount requests hand off ------------------------------------------------------

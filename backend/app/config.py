@@ -23,6 +23,8 @@ Key settings:
     TRUSTED_PROXY_HOPS     — reverse proxies appending to X-Forwarded-For, default 1 (client IP is
                              taken that many entries from the right; 0 = ignore the header)
     WHATSAPP_PERSONA_NAME  — first name of the WhatsApp-only female persona (channel="whatsapp"), default Prachi
+    LOG_HASH_KEY           — secret for hashing session ids in logs (random per run if unset; set it to
+                             follow one chat across restarts/workers)
     DOCS_ENABLED           — true to keep /docs and /openapi.json when CHAT_API_KEY is set, default false
     DASHBOARD_API_KEY      — bearer token guarding GET /api/admin/session-summaries (optional,
                              endpoints return 503 if unset — see app/dashboard.py)
@@ -79,6 +81,8 @@ class Settings(BaseSettings):
     trusted_proxy_hops: int = 1
     # The WhatsApp-only persona's name (data/whatsapp_persona.md). The website chat never uses it.
     whatsapp_persona_name: str = "Prachi"
+    # Secret key for the log-safe session id hash (app/session_store.mask_session_id). Empty = random per run.
+    log_hash_key: str = ""
     # /docs, /redoc and /openapi.json are hidden when CHAT_API_KEY is set, unless this is true.
     docs_enabled: bool = False
     # Employee-dashboard session summaries — see app/dashboard.py. Idle-scan

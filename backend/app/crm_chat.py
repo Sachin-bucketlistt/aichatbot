@@ -100,7 +100,7 @@ async def _store(key: str, result: ChatV2Response) -> None:
         else:
             await client.set(key, result.model_dump_json(), ex=IDEMPOTENCY_TTL_SECONDS)
     except Exception:  # pylint: disable=broad-except
-        logger.exception("Could not store idempotency result for %s", key)
+        logger.exception("Could not store idempotency result for %s", mask_session_id(key))
 
 
 def _require_key(http_request: Request) -> None:

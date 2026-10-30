@@ -1,6 +1,8 @@
+import hashlib
+import hmac
 import json
 import logging
-import re
+import secrets
 import time
 from typing import Any
 
@@ -10,13 +12,20 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_LONG_DIGITS = re.compile(r"\d{6,}")
+# Used when LOG_HASH_KEY is unset. ponytail: ids then correlate only within one process run; set
+# LOG_HASH_KEY to keep them stable across restarts and workers.
+_FALLBACK_LOG_KEY = secrets.token_bytes(32)
 
 
 def mask_session_id(session_id: str | None) -> str:
-    """Log-safe session id. WhatsApp ids are wa-<phone>-<n>, so hide all but the last 4 digits of any
-    long digit run. Redis keys keep the real id; only logs and alert emails use this."""
-    return _LONG_DIGITS.sub(lambda m: "*" * (len(m.group()) - 4) + m.group()[-4:], session_id or "")
+    """Log-safe session id: a keyed hash (HMAC-SHA256, 12 hex chars). WhatsApp ids are wa-<phone>-<n>, so
+    nothing of the phone number is kept, and the key stops anyone reversing it by trying every number
+    (a plain hash would fall to that). The same id always maps to the same value, so one chat can still
+    be followed through the logs. Redis keys keep the real id; logs and alert emails use this."""
+    if not session_id:
+        return ""
+    key = settings.log_hash_key.encode() or _FALLBACK_LOG_KEY
+    return "sid-" + hmac.new(key, session_id.encode(), hashlib.sha256).hexdigest()[:12]
 
 
 # Global redis connection pool

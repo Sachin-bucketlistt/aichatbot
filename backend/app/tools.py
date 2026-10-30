@@ -73,7 +73,7 @@ def escalate_and_capture_lead(
 
     data.append(lead_record)
     LEADS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    logger.info("Lead captured: %s (urgency=%s, phone=%s)", ticket_id, urgency, f"***{phone[-4:]}" if phone else "n/a")
+    logger.info("Lead captured: %s (urgency=%s)", ticket_id, urgency)
 
     return {
         "status": "success",

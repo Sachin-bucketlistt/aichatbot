@@ -22,6 +22,15 @@ from app.session_store import init_redis, close_redis, save_user_info, mask_sess
 from app.attachments import store_attachment, AttachmentError
 from fastapi import UploadFile, File
 
+class _OneLineRecord(logging.LogRecord):
+    """Escape CR/LF in every log message so client-supplied text can't forge extra log lines
+    (OWASP log injection). Tracebacks are formatted separately and unaffected."""
+
+    def getMessage(self) -> str:
+        return super().getMessage().replace("\r", "\\r").replace("\n", "\\n")
+
+
+logging.setLogRecordFactory(_OneLineRecord)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
@@ -95,7 +104,7 @@ async def chat(request: ChatRequest, http_request: Request) -> StreamingResponse
     logger.info(
         "POST /api/chat — %d messages, session=%s",
         len(request.messages),
-        session_id,
+        mask_session_id(session_id),
     )
     response = StreamingResponse(
         # The WhatsApp persona/format is for the trusted CRM only: an anonymous web caller cannot opt in.
