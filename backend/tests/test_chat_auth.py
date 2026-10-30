@@ -134,7 +134,8 @@ def test_persona_never_claims_to_be_human_and_answers_honestly():
     from pathlib import Path
     persona = (Path(__file__).resolve().parents[1] / "data/whatsapp_persona.md").read_text(encoding="utf-8")
     assert "Never say or imply that you are a human" in persona
-    assert "sincerely asks whether you are a bot" in persona and "tell the truth" in persona
+    assert "asks DIRECTLY whether you are a bot" in persona and "tell the truth" in persona
+    assert "Never volunteer the words assistant, virtual assistant" in persona
 
 
 def test_anonymous_web_caller_cannot_select_whatsapp_channel(monkeypatch):
@@ -150,3 +151,37 @@ def test_anonymous_web_caller_cannot_select_whatsapp_channel(monkeypatch):
     monkeypatch.setattr(settings, "chat_api_key", "s3cret")
     client.post("/api/chat", json={**PAYLOAD, "channel": "whatsapp"}, headers={"Authorization": "Bearer s3cret"})
     assert seen["channel"] == "whatsapp"
+
+
+def _dyn(text, *prior, channel=None):
+    msgs = [ChatMessage(role="user", content=t) for t in (*prior, text)]
+    return asyncio.run(llm_module.build_messages(msgs, channel=channel))[0]["content"][-1]["text"]
+
+
+def test_edited_video_rule_fires_only_for_reel_questions():
+    for q in ["Do you provide edited reel?", "edited video chahiye", "reel milegi kya?", "Instagram reel included?"]:
+        dyn = _dyn(q)
+        assert "Dronecraft" in dyn and "109 m" in dyn and "Rs 1,000" in dyn and "FREE" in dyn
+    for q in ["hi", "bungee price?", "is video included?", "are you a real person?"]:
+        assert "Edited reel / edited video" not in _dyn(q)
+    assert "Edited reel / edited video" in _dyn("and the 109m?", "do you give edited reels?")  # follow-up keeps context
+
+
+def test_whatsapp_instructions_do_not_contradict_the_persona():
+    msgs = [ChatMessage(role="user", content="hello")]
+    text = " ".join(b["text"] for b in asyncio.run(llm_module.build_messages(msgs, channel="whatsapp"))[0]["content"])
+    for bad in ("person at a desk", "person on a phone", "on their phone"):
+        assert bad not in text  # persona forbids claiming a desk or phone
+    assert "follow them in this order" in text and "<examples>" in text
+
+def test_virtual_assistant_is_only_ever_an_answer_to_a_direct_question():
+    import re
+    from pathlib import Path
+    data = Path(__file__).resolve().parents[1] / "data"
+    assert "virtual assistant" not in llm_module.WHATSAPP_FORMAT_PROMPT
+    examples = (data / "whatsapp_style.md").read_text(encoding="utf-8")
+    pairs = re.findall(r"^C: (.*)\nYou: (.*)$", examples, flags=re.M)
+    said = [(c, y) for c, y in pairs if "virtual assistant" in y]
+    assert said  # the honest answer exists
+    for customer, _ in said:  # and is only ever shown as the reply to a direct bot/AI/human question
+        assert re.search(r"\b(bot|ai|robot|human|real person|insaan)\b", customer, re.I)

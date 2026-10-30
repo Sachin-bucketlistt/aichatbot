@@ -52,7 +52,7 @@ MAX_TOOL_ITERATIONS = 8
 # static block, so web traffic's prompt cache is untouched.
 WHATSAPP_FORMAT_PROMPT = (
     "## Channel: WhatsApp — OVERRIDES any formatting and length guidance above\n"
-    "You are texting a customer on WhatsApp. Write like a friendly person typing on their phone, "
+    "You are texting a customer on WhatsApp. Write like a friendly person texting, "
     "not like a brochure or a menu.\n"
     "- Plain chat text. NEVER use tables, headings (#), horizontal rules, bold section titles or "
     "[text](url) links. Bare URLs only.\n"
@@ -100,6 +100,35 @@ def _whatsapp_style() -> str:
         ]
         _whatsapp_style_cache = "\n\n".join(parts).replace("{name}", settings.whatsapp_persona_name)
     return _whatsapp_style_cache
+
+
+# Edited reel / edited video: a hard business fact, so it lives in code, not only in prompt prose.
+# Fires on the latest two user messages (so "and the 109m?" after a reel question still counts).
+_EDITED_VIDEO_RE = re.compile(
+    r"\breels?\b|edited\s+(?:video|footage|clip)|edit(?:ed)?\s+(?:kar|wali|wala|video)|"
+    r"(?:instagram|insta)\s+video|cinematic\s+video|\bedited\b",
+    re.IGNORECASE,
+)
+
+EDITED_VIDEO_PROMPT = (
+    "## Edited reel / edited video (business rule, overrides anything else about video)\n"
+    "The customer is asking about an edited reel or edited video. \"Reel\", \"edited reel\" and \"edited "
+    "video\" all mean the same thing. An edited reel is offered at only two places:\n"
+    "- Dronecraft River Rafting: the edited reel (drone + DSLR) is FREE with every route and variation.\n"
+    "- Splash Bungy: an edited video / reel is available ONLY for the 109 m bungee, at Rs 1,000 extra. "
+    "The standard video that Splash prices already include is NOT the edited reel: the Rs 1,000 is only for "
+    "the edited version. No other Splash activity (85 m, swing, zipline, etc.) has an edited reel.\n"
+    "- Every other operator and activity: do not offer or promise an edited reel. Say only what video the "
+    "live catalog lists for that activity (check get_activity / get_activity_addons if you do not already "
+    "have it), exactly as listed, and if it lists no video, say so. Never present a generic video or GoPro "
+    "add-on price as an edited reel.\n"
+    "Answer only what they asked, in your usual short style, and do not bring this up if they did not ask."
+)
+
+
+def _wants_edited_video(chat_messages: list[ChatMessage]) -> bool:
+    recent = [m.content for m in chat_messages if m.role == "user"][-2:]
+    return any(_EDITED_VIDEO_RE.search(text) for text in recent)
 
 
 # Matches bungee/bungy/bungie, case-insensitive — the only trigger for
@@ -397,6 +426,9 @@ async def build_messages(
             "phone, or email in a future message, call `escalate_and_capture_lead` "
             "with urgency='normal' to save it."
         )
+
+    if _wants_edited_video(chat_messages):
+        dynamic_parts.append(EDITED_VIDEO_PROMPT)
 
     # Final guardrail — placed LAST so it benefits from recency bias.
     # The LLM tends to follow the last instruction most strongly.
