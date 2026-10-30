@@ -17,6 +17,13 @@ _SAFETY_WORDS = re.compile(
 )
 
 
+def is_hard_protected(latest_user_message: str) -> bool:
+    """OTP codes, phone numbers and safety talk only. Unlike is_protected_turn this does NOT treat a
+    short message ("bungee price", "rafting") as protected, so it can still reach the live catalog."""
+    text = latest_user_message.strip()
+    return bool(_OTP_RE.match(text) or _PHONE_RE.match(text) or _SAFETY_WORDS.search(text))
+
+
 def is_protected_turn(latest_user_message: str) -> bool:
     """True if this message must always reach the full, unrestricted pipeline —
     never short-circuited by a tool-choice or (any future) content gate."""

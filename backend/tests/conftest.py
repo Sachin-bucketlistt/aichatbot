@@ -61,3 +61,15 @@ class FakeRedis:
         for key in list(self._data.keys()):
             if fnmatch.fnmatch(key, match):
                 yield key
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _reset_forced_choice_memory():
+    """llm remembers which models rejected a forced tool_choice for the life of the process; tests must not leak that."""
+    from app import llm
+    llm._forced_choice_rejected.clear()
+    yield
+    llm._forced_choice_rejected.clear()

@@ -31,7 +31,7 @@ from app.mcp_client import BUNGEE_SUMMARY_TOOL, _DotDict, call_catalog_tool, loa
 from app.retriever import retrieve
 from app.schemas import ChatMessage
 from app.attachments import resolve_attachment
-from app.flow_guard import is_protected_turn
+from app.flow_guard import is_hard_protected, is_protected_turn
 from app.handoff import HANDOFF_PROMPT, HANDOFF_SCHEMA, HANDOFF_TOOL, HANDOFF_REASONS
 from app.token_store import (
     AUTH_TOOLS, extract_token, get_token, set_token,
@@ -46,6 +46,13 @@ from app.session_store import (
 from app.stream_sanitizer import StreamSanitizer
 
 MAX_TOOL_ITERATIONS = 8
+
+# Models that rejected a forced tool_choice (e.g. claude-sonnet-5-5). Remembered for the life of the
+# process so later turns skip the doomed request instead of paying a failed round trip every time.
+_forced_choice_rejected: set[str] = set()
+
+# A price in a draft reply. Used to catch "answered from memory" on catalog questions.
+_PRICE_RE = re.compile(r"₹\s?\d|\brs\.?\s?\d|\binr\s?\d|\d[\d,]*\s?(?:rs|rupees|inr)\b", re.IGNORECASE)
 
 # Appended LAST to the dynamic block when the caller says channel="whatsapp"
 # (recency wins over the KB's own table/markdown guidance). Not in the cached
@@ -427,6 +434,13 @@ async def build_messages(
             "with urgency='normal' to save it."
         )
 
+    latest_text = next((m.content for m in reversed(chat_messages) if m.role == "user"), "")
+    if settings.mcp_server_url and _CATALOG_RE.search(latest_text):
+        dynamic_parts.append(
+            "## Live data needed\n"
+            "This message asks about prices, activities or availability. Call the catalog tool first and answer "
+            "from its result. Never quote a price or availability from memory, even for a short question."
+        )
     if _wants_edited_video(chat_messages):
         dynamic_parts.append(EDITED_VIDEO_PROMPT)
 
@@ -571,6 +585,9 @@ async def _run_tool_loop(
         t for t in all_tools if t["function"]["name"] != "search_web"
     ] if mcp_tools else all_tools
     empty_retries = 0
+    retract_ok = handoff_state is not None   # only the v2 consumers can drop text already streamed
+    price_retry_done = False
+    tool_used = False
     for iteration in range(MAX_TOOL_ITERATIONS):
         # Force a tool call only when it's actually plausible the message
         # needs the catalog — never for mid-flow/safety-sensitive turns
@@ -580,10 +597,14 @@ async def _run_tool_loop(
         # unnecessary forced tool call, never a blocked response, but a
         # protected turn getting force-routed toward the catalog tools is
         # still worth avoiding on principle.
+        # Short catalog questions ("bungee price", "rafting") only skip forcing for the hard-protected
+        # cases (OTP, phone, safety); the generic 3-word rule must not keep them off the live catalog.
+        # A model that already rejected forcing is not asked again.
         should_force = (
             iteration < 1
             and mcp_tools
-            and not is_protected_turn(_latest_user_message(messages))
+            and settings.llm_model not in _forced_choice_rejected
+            and not is_hard_protected(_latest_user_message(messages))
             and _wants_catalog(messages)
         )
         if should_force:
@@ -613,7 +634,8 @@ async def _run_tool_loop(
             # ("any"/"tool"). Forcing is only a latency optimisation, so degrade to auto.
             if iter_choice != "required" or "tool_choice" not in str(exc):
                 raise
-            logger.warning("Model rejected forced tool_choice; retrying with auto")
+            logger.warning("Model rejected forced tool_choice; retrying with auto (and not forcing again)")
+            _forced_choice_rejected.add(settings.llm_model)
             iter_choice = "auto"
             response = await litellm.acompletion(tool_choice=iter_choice, **call_kwargs)
 
@@ -658,9 +680,30 @@ async def _run_tool_loop(
                 continue
             raise RuntimeError(f"empty model response (finish_reason={finish_reason})")
 
+        if (
+            not tc_parts and retract_ok and not tool_used and not price_retry_done
+            and mcp_tools and _wants_catalog(messages) and _PRICE_RE.search(full_content)
+        ):
+            # The model priced a catalog question from memory. Drop that draft and ask once more so it
+            # looks the answer up. Costs one extra call, and only when it skipped the tool.
+            price_retry_done = True
+            logger.warning("Catalog question answered with a price but no tool call; re-asking once")
+            yield ("retract", "")
+            yield "Checking live prices…"
+            messages.append({"role": "assistant", "content": full_content})
+            messages.append({
+                "role": "user",
+                "content": (
+                    "(internal note, never mention it) That answer quoted prices without checking the live "
+                    "catalog. Call the right catalog tool first, then answer again in the same short style."
+                ),
+            })
+            continue
+
         if not tc_parts:
             logger.info("Tool loop done after %d iterations, streamed %d chars", iteration + 1, len(full_content))
             break
+        tool_used = True
 
         # Reconstruct tool call objects that support both obj.key and obj["key"]
         # (litellm internals use dict-style access on tool calls)
@@ -803,7 +846,11 @@ async def stream_chat_response(
         sanitizer = StreamSanitizer()
         async for event in _run_tool_loop(messages, session_id, handoff_state):
             if isinstance(event, tuple):
-                _, delta = event
+                kind, delta = event
+                if kind == "retract":   # the loop discarded its draft: forget it (history + held-back tail)
+                    assistant_content.clear()
+                    sanitizer = StreamSanitizer()
+                    continue
                 if delta:
                     token_count += 1
                     assistant_content.append(delta)  # raw text — for history/session save, never sanitized
