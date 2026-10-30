@@ -33,7 +33,9 @@ from app.retriever import retrieve
 from app.schemas import ChatMessage
 from app.attachments import resolve_attachment
 from app.flow_guard import is_hard_protected, is_protected_turn
-from app.handoff import HANDOFF_PROMPT, HANDOFF_SCHEMA, HANDOFF_TOOL, HANDOFF_REASONS
+from app.handoff import (
+    GUJARATI_DISCOUNT_PROMPT, HANDOFF_PROMPT, HANDOFF_SCHEMA, HANDOFF_TOOL, HANDOFF_REASONS, asks_gujarati_discount,
+)
 from app.token_store import (
     AUTH_TOOLS, extract_token, get_token, set_token,
     extract_phone, set_pending_phone, pop_pending_phone,
@@ -70,6 +72,8 @@ PAYMENT_CHOICE_PROMPT = (
     "- Call create_payment_link only after they choose the link, and once per cart: if you already sent a link "
     "and the cart has not changed, resend it. If the cart changed, tell them the old link is outdated and "
     "create a new one.\n"
+    "- If you gave them a coupon code in this chat, a payment link cannot apply it: tell them the code works at "
+    "the website checkout, send the cart link, and send a payment link only if they prefer it without the code.\n"
     "- You never take payment or confirm it went through: they pay on the link's page and bucketlistt confirms."
 )
 
@@ -93,8 +97,8 @@ WHATSAPP_FORMAT_PROMPT = (
     "- This overrides the knowledge base: for safety worries give ONE sentence of reassurance (one stat at "
     "most), then ask a question. Do not recite full track records, checklists or policies unless asked.\n"
     "- Use *bold* (single asterisks) only for a name or a price that should stand out, and _italic_ "
-    "sparingly. Where the guidance above says to strike through an original price, use WhatsApp's SINGLE "
-    "tilde on each side, like ~₹2,500~ ₹2,000, never double tildes (~~).\n"
+    "sparingly. Show ONLY the current selling price (the discounted price, e.g. *₹2,000*). Never show the "
+    "original/MRP price and never strike anything through: this overrides the price-anchoring rule above.\n"
     "- Aim for under about 200 characters, and never over about 400 unless they asked for a full price "
     "list. Cut filler, intros and recaps.\n"
     "- Add ONE emoji that fits the moment to most replies, at the end of a sentence: 🪂 bungee, 🚣 rafting, "
@@ -493,6 +497,8 @@ async def build_messages(
 
     if handoff_enabled:
         dynamic_parts.append(HANDOFF_PROMPT)
+        if asks_gujarati_discount([m.content for m in chat_messages if m.role == "user"]):
+            dynamic_parts.append(GUJARATI_DISCOUNT_PROMPT)
     if _payment_link_allowed(channel, session_id):
         dynamic_parts.append(PAYMENT_CHOICE_PROMPT)
     if channel == "whatsapp":

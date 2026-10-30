@@ -233,11 +233,12 @@ def test_handoff_still_gets_a_reply_when_the_model_call_fails(monkeypatch):
     assert j["handoff"] is True and "team" in j["reply"] and j["error"] == "overloaded"
 
 
-def test_double_tilde_strikethrough_becomes_whatsapp_single_tilde(monkeypatch):
-    frames = [_frame(delta="- Freestyle: ~~₹2,500~~ ₹2,000 and ~~₹3,000~~ ₹2,500", done=False), _frame(delta="", done=True)]
+def test_struck_through_original_prices_are_removed_on_whatsapp(monkeypatch):
+    frames = [_frame(delta="- Freestyle: ~~₹2,500~~ *₹2,000* and ~₹3,000~ ₹2,500, ~~old~~ news", done=False),
+              _frame(delta="", done=True)]
     _fake_stream(monkeypatch, frames)
     reply = client.post("/api/v2/chat", json=_body(), headers=AUTH).json()["reply"]
-    assert reply == "- Freestyle: ~₹2,500~ ₹2,000 and ~₹3,000~ ₹2,500"
+    assert reply == "- Freestyle: *₹2,000* and ₹2,500, ~old~ news"
 
 
 def test_strikethrough_left_alone_on_other_channels(monkeypatch):
@@ -287,8 +288,8 @@ def test_stream_endpoint_sends_status_deltas_and_one_final_frame(monkeypatch):
     assert [f["delta"] for f in out if f.get("delta")] == ["Nice! ~~₹2,500~~ ₹2,000", "\n\nWant slots?"]  # raw
     final = out[-1]
     assert final["done"] is True and sum(1 for f in out if f["done"]) == 1
-    assert final["reply"] == "Nice! ~₹2,500~ ₹2,000\n\nWant slots?"          # canonical: strike fixed
-    assert final["messages"] == ["Nice! ~₹2,500~ ₹2,000", "Want slots?"]
+    assert final["reply"] == "Nice! ₹2,000\n\nWant slots?"                   # canonical: old price removed
+    assert final["messages"] == ["Nice! ₹2,000", "Want slots?"]
     assert final["handoff"] is False and final["error"] is None
 
 

@@ -10,6 +10,10 @@ import re
 
 HANDOFF_TOOL = "request_human_handoff"
 
+# Given ONLY to a customer who asks for a discount because they are Gujarati. The code is in the prompt
+# only for such a chat (see asks_gujarati_discount), so the model cannot offer it upfront.
+GUJARATI_COUPON = "GUJARATI5"
+
 HANDOFF_REASONS = [
     "customer_requested_human",
     "cannot_answer",
@@ -48,12 +52,33 @@ HANDOFF_PROMPT = (
     "### Discount requests\n"
     "When the customer asks or pushes for an extra discount, a special or lower price, a coupon or a "
     "better deal (including 'Gujarati/student/group discount' or 'last price'): never say no, never say "
-    "you cannot or do not give discounts, and never invent, offer or promise one. Reply in their language "
+    "you cannot or do not give discounts, and never invent, offer or promise one (the only exception is a "
+    "coupon given to you in a separate Gujarati instruction). Reply in their language "
     "in at most two short sentences: the prices shown are already discounted, and you will pass this to a "
     "teammate who can decide on it. Then call request_human_handoff with reason discount_request in the "
     "same turn. Only for a real request to pay less: a question about the listed or discounted price is "
     "answered normally, with no handoff."
 )
+
+GUJARATI_DISCOUNT_PROMPT = (
+    "## Gujarati customer discount — this customer asked for a discount because they are Gujarati\n"
+    f"Tell them warmly that there is a special discount for Gujarati customers: apply coupon {GUJARATI_COUPON} "
+    "at checkout for 5% extra off, on top of the already-discounted prices. One or two short sentences, in "
+    "their language. Then call request_human_handoff with reason discount_request in the same turn, so a "
+    "teammate can help further. Offer no other discount and never change the 5%. Do not mention this to "
+    "anyone who has not asked for it as a Gujarati."
+)
+
+_GUJARATI = re.compile(r"\bguj[a-z]*", re.I)
+_DISCOUNT_WORD = re.compile(
+    r"discount|offer|coupon|concession|rebate|sast[ai]|cheaper|kam\s*kar|special\s+(?:rate|price)", re.I)
+
+
+def asks_gujarati_discount(user_texts: list[str]) -> bool:
+    """True if any single customer message asks for a discount as a Gujarati
+    ("Gujarati ke liye special discount"). Not just mentioning Gujarat, and not the (GJ) state tag."""
+    return any(_GUJARATI.search(t) and _DISCOUNT_WORD.search(t) for t in user_texts)
+
 
 # A customer asking WHAT the bot is ("are you a bot / real person?") is not asking for a human.
 _IDENTITY_QUESTION = re.compile(

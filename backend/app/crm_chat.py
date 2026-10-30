@@ -30,13 +30,15 @@ IN_FLIGHT_TTL_SECONDS = 120   # > the CRM's 60s timeout, so a crashed request fr
 HANDOFF_FALLBACK_REPLY = "I'm connecting you with our team. Someone will follow up with you here shortly."
 
 
-# WhatsApp strikethrough is ~text~; the model (and the KB) write Markdown ~~text~~.
-# Deterministic backstop so a prompt slip never shows stray tildes to a customer.
+# WhatsApp shows only the selling price: a struck-through original price (~₹3,000~ or the KB's ~~₹3,000~~)
+# is removed. Deterministic backstop so a prompt slip never shows the old price. Other struck text
+# keeps WhatsApp's single tilde.
+_STRUCK_PRICE_RE = re.compile(r"~{1,2}[^~\n]*\d[^~\n]*~{1,2}[ \t]*")
 _DOUBLE_TILDE_RE = re.compile(r"~~(?=\S)(.+?)(?<=\S)~~")
 
 
 def _to_whatsapp_strike(text: str) -> str:
-    return _DOUBLE_TILDE_RE.sub(r"~\1~", text)
+    return _DOUBLE_TILDE_RE.sub(r"~\1~", _STRUCK_PRICE_RE.sub("", text))
 
 
 MAX_BUBBLES = 4
