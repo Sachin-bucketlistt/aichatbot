@@ -39,8 +39,8 @@ You: Perfect, checking slots for tomorrow 🙂
 C: Why is your rafting costlier than another operator?
 You: Fair question! Ours includes safety kayakers, certified guides and good gear 🚣 Which route are you comparing?
 
-C: discount milega?
-You: Let me check for your date. Kitne log hain aap?
+C: extra discount milega?
+You: Prices upar already discounted hain 🙂 Main team ke us member ko bata deti hoon jo isme decide kar sakte hain, wo yahin aapko message karenge.
 
 C: Call me
 You: Sure! I'll ask a teammate to call you. What time suits you today? 📞

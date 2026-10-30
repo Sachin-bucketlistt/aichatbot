@@ -505,19 +505,40 @@ async def build_messages(
     return [system_message] + resolved
 
 
+# create_payment_link's real schema (live MCP): the server prices the booking from these ids, so the
+# model gets no way to send an amount. Anything outside this list (callbackUrl too: no redirects to
+# model-chosen URLs) is dropped.
+_PAYMENT_ARGS = {"authToken", "contactPersonName", "contactNumber", "contactEmail", "payAdvanceOnly", "items"}
+_PAYMENT_ITEM_ARGS = {"experienceId", "activityId", "timeSlotId", "timeSlotLabel", "bookingDate",
+                      "totalParticipants", "addOns"}
+
+
+def _strip_money_fields(args: dict) -> dict:
+    """Keep only the schema's known payment arguments. If the MCP ever adds an amount-like field, the model
+    still cannot set it until it is deliberately added here."""
+    out = {k: v for k, v in args.items() if k in _PAYMENT_ARGS}
+    if isinstance(out.get("items"), list):
+        out["items"] = [{k: v for k, v in i.items() if k in _PAYMENT_ITEM_ARGS}
+                        for i in out["items"] if isinstance(i, dict)]
+    return out
+
+
 def _inject_auth_token(call, session_id: str | None) -> None:
     """For an authenticated MCP tool, fill in the cached authToken so the user
     isn't re-prompted for an OTP. Mutates call.function.arguments in place."""
     if call.function.name not in AUTH_TOOLS:
         return
     token = get_token(session_id)
-    if not token:
+    if not token and call.function.name != PAYMENT_TOOL:
         return
     try:
         args = json.loads(call.function.arguments) if call.function.arguments else {}
     except (ValueError, TypeError):
         args = {}
-    args["authToken"] = token  # server-owned token always wins over anything the model guessed
+    if call.function.name == PAYMENT_TOOL:
+        args = _strip_money_fields(args)  # the model/customer never chooses what is charged
+    if token:
+        args["authToken"] = token  # server-owned token always wins over anything the model guessed
     call.function.arguments = json.dumps(args)
 
 

@@ -63,3 +63,18 @@ def test_auth_token_is_injected_into_payment_call():
     call = type("C", (), {"function": type("F", (), {"name": "create_payment_link", "arguments": "{}"})()})()
     llm_module._inject_auth_token(call, SID)
     assert json.loads(call.function.arguments)["authToken"] == "tok-123"
+
+
+def test_payment_call_keeps_only_schema_args():
+    token_store._store.clear()
+    token_store.set_token(SID, "tok-123")
+    item = {"experienceId": "e", "activityId": "a", "timeSlotId": "t", "timeSlotLabel": "09:00 - 10:00",
+            "bookingDate": "2026-11-01", "totalParticipants": 2, "price": 1, "amount": 1}
+    args = {"contactPersonName": "A", "contactNumber": "9", "items": [item], "amount": 1,
+            "totalAmount": 1, "discount": 99, "callbackUrl": "https://evil.example"}
+    call = type("C", (), {"function": type("F", (), {"name": "create_payment_link", "arguments": json.dumps(args)})()})()
+    llm_module._inject_auth_token(call, SID)
+    out = json.loads(call.function.arguments)
+    assert out == {"contactPersonName": "A", "contactNumber": "9", "authToken": "tok-123",
+                   "items": [{k: v for k, v in item.items() if k not in ("price", "amount")}]}
+    assert out["items"][0]["totalParticipants"] == 2   # the old regex wrongly dropped this ("total")

@@ -142,3 +142,22 @@ def test_v2_logs_do_not_contain_the_phone_number(monkeypatch, caplog):
         client.post("/api/v2/chat/stream", json={"messages": [{"role": "user", "content": "hi"}],
                     "session_id": "wa-919876543210-2"}, headers=AUTH)
     assert "919876543210" not in caplog.text and "3210" in caplog.text
+
+
+# --- 4. extra-discount requests hand off ------------------------------------------------------
+
+@pytest.mark.parametrize("text", [
+    "Gujarti ke liye special discount", "extra discount milega?", "discount?", "any discount",
+    "thoda kam karo", "price kam karo", "last price batao", "best price?", "koi offer hai?",
+    "do you have a coupon code", "can you reduce the price", "student discount hai kya", "bargain karna hai",
+])
+def test_discount_requests_hand_off(text):
+    assert detect_handoff(text) == "discount_request"
+
+
+@pytest.mark.parametrize("text", [
+    "what is the discounted price of rafting", "price kitna hai", "bungee price", "is the offer price per person?",
+    "kitne ka hai 16 km rafting", "worst case if it rains?",
+])
+def test_plain_price_questions_do_not_hand_off(text):
+    assert detect_handoff(text) is None
