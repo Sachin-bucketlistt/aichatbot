@@ -27,7 +27,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 from app.mcp_client import ALLOWED_TOOLS as MCP_ALLOWED_TOOLS
-from app.mcp_client import BUNGEE_SUMMARY_TOOL, _DotDict, call_catalog_tool, load_catalog_tools
+from app.mcp_client import BUNGEE_SUMMARY_TOOL, PAYMENT_TOOL, _DotDict, call_catalog_tool, load_catalog_tools
 from app.retriever import retrieve
 from app.schemas import ChatMessage
 from app.attachments import resolve_attachment
@@ -53,6 +53,24 @@ _forced_choice_rejected: set[str] = set()
 
 # A price in a draft reply. Used to catch "answered from memory" on catalog questions.
 _PRICE_RE = re.compile(r"₹\s?\d|\brs\.?\s?\d|\binr\s?\d|\d[\d,]*\s?(?:rs|rupees|inr)\b", re.IGNORECASE)
+
+# WhatsApp + logged-in only (see build_messages): offer the customer a choice at checkout.
+# Recency beats the static "you cannot take payment" lines, which still hold for the web chat.
+PAYMENT_CHOICE_PROMPT = (
+    "## Payment on WhatsApp — OVERRIDES the 'you cannot take payment' lines above\n"
+    "You can send a payment link here. Once the cart is confirmed with get_cart, ask ONE short question: "
+    "should you send a payment link right here on WhatsApp, or would they rather pay on the website, where "
+    "the cart is already filled in (they log in with the same phone number)? Send neither link until they choose.\n"
+    "- Link here: call create_payment_link, then send the URL it returns exactly as given, with the amount. "
+    "Never edit, shorten or invent a link.\n"
+    "- Website: give https://www.bucketlistt.com/experiences/cart.\n"
+    "- If create_payment_link fails or returns no URL, say so briefly, give the website cart link and offer a "
+    "teammate call.\n"
+    "- Call create_payment_link only after they choose the link, and once per cart: if you already sent a link "
+    "and the cart has not changed, resend it. If the cart changed, tell them the old link is outdated and "
+    "create a new one.\n"
+    "- You never take payment or confirm it went through: they pay on the link's page and bucketlistt confirms."
+)
 
 # Appended LAST to the dynamic block when the caller says channel="whatsapp"
 # (recency wins over the KB's own table/markdown guidance). Not in the cached
@@ -349,6 +367,11 @@ async def _resolve_message_content(msg: ChatMessage) -> str | list[dict]:
     })
     return blocks
 
+def _payment_link_allowed(channel: str | None, session_id: str | None) -> bool:
+    """The payment-link tool and its prompt exist only for a logged-in WhatsApp session."""
+    return channel == "whatsapp" and bool(get_token(session_id))
+
+
 async def build_messages(
     chat_messages: list[ChatMessage],
     session_id: str | None = None,
@@ -457,6 +480,8 @@ async def build_messages(
 
     if handoff_enabled:
         dynamic_parts.append(HANDOFF_PROMPT)
+    if _payment_link_allowed(channel, session_id):
+        dynamic_parts.append(PAYMENT_CHOICE_PROMPT)
     if channel == "whatsapp":
         dynamic_parts.append(WHATSAPP_FORMAT_PROMPT)
 
@@ -512,6 +537,7 @@ _TOOL_STATUS_LABELS = {
     "get_cart": "Fetching cart…",
     "update_cart_item": "Updating cart…",
     "remove_from_cart": "Removing from cart…",
+    "create_payment_link": "Creating payment link…",
     "get_my_bookings": "Fetching bookings…",
     "search_web": "Searching the web…",
     "escalate_and_capture_lead": "Creating support ticket…",
@@ -523,8 +549,8 @@ async def _execute_tool(call, session_id: str | None, mcp_session=None) -> dict:
     """Execute a single tool call and return the result dict."""
     tool_name = call.function.name
     t0 = time.perf_counter()
-    # OTP tools carry the customer's phone number / OTP code: never log their arguments.
-    logged_args = "<redacted>" if tool_name in ("send_otp", "verify_otp") else (call.function.arguments or "")[:200]
+    # OTP and payment tools carry the customer's phone number / contact details: never log their arguments.
+    logged_args = "<redacted>" if tool_name in ("send_otp", "verify_otp", PAYMENT_TOOL) else (call.function.arguments or "")[:200]
     logger.info("Executing tool: %s  args=%s", tool_name, logged_args)
     try:
         if tool_name in MCP_ALLOWED_TOOLS:
@@ -559,6 +585,7 @@ async def _run_tool_loop(
     messages: list[dict],
     session_id: str | None = None,
     handoff_state: dict | None = None,
+    channel: str | None = None,
 ) -> AsyncGenerator[str | tuple[str, str], None]:
     """Run the tool-calling loop as an async generator.
 
@@ -579,6 +606,8 @@ async def _run_tool_loop(
     logger.info(
         "[bungee-summary] tool %s this turn", "enabled" if bungee_query else "disabled (non-bungee query)"
     )
+    if not _payment_link_allowed(channel, session_id):
+        mcp_tools = [t for t in mcp_tools if t["function"]["name"] != PAYMENT_TOOL]
     logger.info("Loaded %d MCP tools, %d local tools", len(mcp_tools), len(TOOL_SCHEMAS))
     all_tools = TOOL_SCHEMAS + mcp_tools + ([HANDOFF_SCHEMA] if handoff_state is not None else [])
     first_iter_tools = [
@@ -844,7 +873,7 @@ async def stream_chat_response(
         token_count = 0
         assistant_content = []
         sanitizer = StreamSanitizer()
-        async for event in _run_tool_loop(messages, session_id, handoff_state):
+        async for event in _run_tool_loop(messages, session_id, handoff_state, channel):
             if isinstance(event, tuple):
                 kind, delta = event
                 if kind == "retract":   # the loop discarded its draft: forget it (history + held-back tail)

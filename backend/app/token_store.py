@@ -27,7 +27,7 @@ _store: dict[str, tuple[str, float]] = {}
 TTL_SECONDS = 30 * 60  # bucketlistt sessions are short-lived; 30 min is safe.
 
 # MCP tools that require an authToken argument.
-AUTH_TOOLS = {"add_to_cart", "get_cart", "update_cart_item", "remove_from_cart", "get_my_bookings"}
+AUTH_TOOLS = {"add_to_cart", "get_cart", "update_cart_item", "remove_from_cart", "get_my_bookings", "create_payment_link"}
 
 
 def set_token(session_id: str | None, token: str | None) -> None:

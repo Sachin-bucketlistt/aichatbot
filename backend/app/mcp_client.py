@@ -4,10 +4,11 @@ Whitelists browse tools (destinations, experiences, activities, slots, add-ons),
 OTP-based auth (send_otp, verify_otp), and cart management (add_to_cart, get_cart,
 update_cart_item, remove_from_cart), plus read-only get_my_bookings.
 
-**Payment tools (create_payment_link, create_booking_order) remain excluded** —
-the bot can build a cart for the user, but the actual charge happens on
-bucketlistt.com, not through the chatbot. This keeps the money-moving surface
-zero-sized while still letting the bot do the useful pre-checkout work.
+**create_booking_order stays excluded.** The bot never charges anyone: the one
+payment tool it has is create_payment_link, which only returns a Razorpay link the
+customer pays on themselves. It is whitelisted here but offered to the model ONLY on
+WhatsApp for a logged-in session (gated per turn in app/llm.py, like the bungee tool),
+so the web chat's tool surface is unchanged.
 
 The authToken from verify_otp flows through the conversation naturally — the
 LLM sees it in the tool result and passes it into subsequent authenticated
@@ -63,6 +64,9 @@ CACHEABLE_TOOLS = {
 # offered to the LLM when the user's message is about bungee jumping.
 BUNGEE_SUMMARY_TOOL = "get_activities_summary"
 
+# Returns a payment link for the customer's cart; gated in app/llm.py (WhatsApp + logged in).
+PAYMENT_TOOL = "create_payment_link"
+
 ALLOWED_TOOLS = {
     # Browse (read-only, no auth)
     "get_destinations",
@@ -86,6 +90,8 @@ ALLOWED_TOOLS = {
     "get_cart",
     "update_cart_item",
     "remove_from_cart",
+    # Pay-by-link (WhatsApp, logged-in only — see PAYMENT_TOOL)
+    "create_payment_link",
     # Post-book read
     "get_my_bookings",
 }
@@ -390,6 +396,13 @@ async def _postprocess(fn: str, text: str, tool_args: dict, session=None) -> dic
             "This is a compact bungee-only summary (no location/media/full description). "
             "If the user asks for MORE detail than this has, call get_activity(identifier=...) "
             "on the specific activity's _id for the full record."
+        )
+    if fn == PAYMENT_TOOL:
+        result["_hint"] = (
+            "Send the customer the payment URL from this result EXACTLY as returned, as a bare URL on its own "
+            "line with the amount. Do not edit, shorten or invent a link. Do not say the payment is done: the "
+            "customer pays on that page and bucketlistt confirms it. If there is no URL in the result, say you "
+            "could not create it and give the website cart link instead."
         )
     if fn == "add_to_cart":
         result["_hint"] = (
