@@ -27,6 +27,7 @@ from pathlib import Path
 
 from app import session_store
 from app.config import settings
+from app.handoff import HANDOFF_REASONS
 from app.mcp_client import _get_http_client
 from app.tools import get_aclient
 
@@ -62,8 +63,34 @@ SUMMARY_TOOL = {
                 "type": "boolean",
                 "description": "True if a human should follow up — unresolved question, clear booking intent, or a complaint.",
             },
+            "outcome": {
+                "type": "string",
+                "enum": ["booked", "lead_captured", "handed_off", "answered", "abandoned"],
+                "description": (
+                    "How the chat ended: booked (a booking/payment was completed), lead_captured (contact "
+                    "details were left), handed_off (passed to a human), answered (user's questions were "
+                    "answered, nothing further), abandoned (user dropped off mid-flow or unresolved)."
+                ),
+            },
+            "had_unanswered_question": {
+                "type": "boolean",
+                "description": "True if the assistant failed to answer something the user asked (said it didn't know, deflected, or gave a non-answer).",
+            },
+            "handoff_reason": {
+                "type": "string",
+                "enum": ["none", *HANDOFF_REASONS],
+                "description": "Why a human was or should have been brought in; 'none' if no handoff was needed.",
+            },
+            "tool_issues": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Short notes on any point where the assistant said a lookup, availability check, login or booking step failed or was unavailable. Empty if none.",
+            },
         },
-        "required": ["summary", "topics", "questions_asked", "sentiment", "requires_followup"],
+        "required": [
+            "summary", "topics", "questions_asked", "sentiment", "requires_followup",
+            "outcome", "had_unanswered_question", "handoff_reason", "tool_issues",
+        ],
     },
 }
 
@@ -75,7 +102,7 @@ async def _generate_summary(messages: list[dict]) -> dict:
     transcript = "\n".join(f"{m.get('role', '?')}: {m.get('content', '')}" for m in messages)
     response = await get_aclient().messages.create(
         model=settings.web_search_model,  # cheap/fast model, same one used for search_web
-        max_tokens=700,
+        max_tokens=900,
         tools=[SUMMARY_TOOL],
         tool_choice={"type": "tool", "name": "submit_conversation_summary"},
         messages=[{

@@ -27,7 +27,20 @@ _FAKE_FIELDS = {
     "questions_asked": ["How much is bungee jumping?"],
     "sentiment": "positive",
     "requires_followup": False,
+    "outcome": "answered",
+    "had_unanswered_question": False,
+    "handoff_reason": "none",
+    "tool_issues": [],
 }
+
+
+def test_summary_schema_requires_new_fields_and_matches_handoff_reasons():
+    from app.handoff import HANDOFF_REASONS
+
+    schema = dashboard.SUMMARY_TOOL["input_schema"]
+    assert {"outcome", "had_unanswered_question", "handoff_reason", "tool_issues"} <= set(schema["required"])
+    assert set(schema["properties"]["handoff_reason"]["enum"]) == {"none", *HANDOFF_REASONS}
+    assert set(_FAKE_FIELDS) == set(schema["required"])
 
 
 # --- summary generation ------------------------------------------------
