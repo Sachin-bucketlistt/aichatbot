@@ -28,13 +28,14 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 from app.mcp_client import ALLOWED_TOOLS as MCP_ALLOWED_TOOLS
 from app.mcp_client import BUNGEE_SUMMARY_TOOL, PAYMENT_TOOL, _DotDict, call_catalog_tool, load_catalog_tools
+from app.price_overview import price_overview_text, wants_price_overview
 from app.region import REGION_STYLES, region_from_messages, region_prompt
 from app.retriever import retrieve
 from app.schemas import ChatMessage
 from app.attachments import resolve_attachment
 from app.flow_guard import is_hard_protected, is_protected_turn
 from app.handoff import (
-    GUJARATI_DISCOUNT_PROMPT, HANDOFF_PROMPT, HANDOFF_SCHEMA, HANDOFF_TOOL, HANDOFF_REASONS, asks_gujarati_discount,
+    GUJARATI_DISCOUNT_PROMPT, HANDOFF_PROMPT, HANDOFF_SCHEMA, HANDOFF_TOOL, HANDOFF_REASONS, asks_gujarati_discount, detect_handoff,
 )
 from app.token_store import (
     AUTH_TOOLS, extract_token, get_token, set_token,
@@ -904,6 +905,17 @@ async def stream_chat_response(
                 "done": False,
             })
             yield _sse({"delta": "", "done": True, "session_capped": True})
+            return
+
+        user_text = next((m.content for m in reversed(chat_messages) if m.role == "user"), "")
+        overview = price_overview_text()
+        if (channel == "whatsapp" and overview and wants_price_overview(user_text)
+                and not (handoff_state is not None and detect_handoff(user_text))):
+            # Whole price list asked for: send the fixed message word for word, no model call.
+            if session_id:
+                await save_turn(session_id, user_text, overview)
+            yield _sse({"delta": overview, "done": False})
+            yield _sse({"delta": "", "done": True})
             return
 
         t0 = time.perf_counter()

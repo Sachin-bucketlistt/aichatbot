@@ -19,6 +19,7 @@ from app.session_store import mask_session_id
 from app.config import settings
 from app.handoff import detect_handoff
 from app.llm import stream_chat_response
+from app.price_overview import price_overview_text
 from app.rate_limit import has_valid_chat_key
 from app.schemas import ChatRequest
 
@@ -114,7 +115,8 @@ def _make_result(request: ChatRequest, session_id: str, parts: list[str], error:
                  capped: bool, handoff_state: dict) -> ChatV2Response:
     """Turn what stream_chat_response produced into the v2 response (shared by JSON and stream)."""
     reply = "".join(parts).strip()
-    if (request.channel or "whatsapp") == "whatsapp":
+    fixed = bool(reply) and reply == price_overview_text()   # the fixed price message keeps its ~struck~ prices and stays one bubble
+    if (request.channel or "whatsapp") == "whatsapp" and not fixed:
         reply = _to_whatsapp_strike(reply)
     last_user = next((m.content for m in reversed(request.messages) if m.role == "user"), "")
     reason = None if capped else handoff_state.get("reason") or detect_handoff(last_user)
@@ -123,7 +125,7 @@ def _make_result(request: ChatRequest, session_id: str, parts: list[str], error:
     if not reply and not error:
         error = "empty_reply"   # never hand the CRM a blank message with no error: it would send it
     return ChatV2Response(
-        session_id=session_id, reply=reply, messages=_split_messages(reply),
+        session_id=session_id, reply=reply, messages=[reply] if fixed else _split_messages(reply),
         handoff=bool(reason), handoff_reason=reason, session_capped=capped, error=error,
     )
 
