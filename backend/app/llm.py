@@ -28,7 +28,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 from app.mcp_client import ALLOWED_TOOLS as MCP_ALLOWED_TOOLS
 from app.mcp_client import BUNGEE_SUMMARY_TOOL, PAYMENT_TOOL, _DotDict, call_catalog_tool, load_catalog_tools
-from app.price_overview import price_overview_text, wants_price_overview
+from app.price_overview import price_overview_text, should_send_overview
 from app.region import REGION_STYLES, region_from_messages, region_prompt
 from app.retriever import retrieve
 from app.schemas import ChatMessage
@@ -909,8 +909,11 @@ async def stream_chat_response(
 
         user_text = next((m.content for m in reversed(chat_messages) if m.role == "user"), "")
         overview = price_overview_text()
-        if (channel == "whatsapp" and overview and wants_price_overview(user_text)
+        if (channel == "whatsapp" and overview
+                and should_send_overview([m.content for m in chat_messages if m.role == "user"],
+                                         [m.content for m in chat_messages if m.role == "assistant"])
                 and not (handoff_state is not None and detect_handoff(user_text))):
+            logger.info("Sending the fixed price overview (session=%s)", mask_session_id(session_id))
             # Whole price list asked for: send the fixed message word for word, no model call.
             if session_id:
                 await save_turn(session_id, user_text, overview)
