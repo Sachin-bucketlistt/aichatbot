@@ -28,16 +28,16 @@ _STRONG = re.compile(
     re.IGNORECASE,
 )
 # A general ask: a price/options word with no single activity named (or two or more named), and no specifics
-# (a height or distance, a named jump, "book", a date, a head-count). "bungee prices?" or "price of 111m"
+# (a height or distance, a named jump, a date, a head-count). "bungee prices?" or "price of 111m"
 # stay with the model, which answers for that one activity.
 _ASK = re.compile(
-    r"\b(?:price|prices|pricing|rate|rates|cost|costs|charges|fees|kimat|kitna|kitne|options|activities|"
+    r"\b(?:price|prices|pricing|rate|rates|cost|costs|charges|fees|kimat|kimmat|bhav|bhaav|daam|kitna|kitne|options|activities|"
     r"details|detail|offers|list|info|information)\b",
     re.IGNORECASE,
 )
 _SPECIFIC = re.compile(
     r"\b\d+ ?(?:m|km|meter|metre|meters|metres)\b|thrill factory|splash|jumpin|himalayan|ganga|drone|freestyle|"
-    r"\bbook|\bdate\b|today|tomorrow|weekend|\bpeople\b|\bpersons\b|\bfor \d|\b\d+ (?:of us|persons?|people|log)\b",
+    r"\bdate\b|today|tomorrow|weekend|\bpeople\b|\bpersons\b|\bfor \d|\b\d+ (?:of us|persons?|people|log)\b",
     re.IGNORECASE,
 )
 _ACTIVITIES = (

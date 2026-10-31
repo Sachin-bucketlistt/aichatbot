@@ -17,7 +17,10 @@ AUTH = {"Authorization": "Bearer k"}
     "send me the price list", "all prices please", "what all activities do you offer?", "Price range?",
     "rate card", "details of all the activities", "sabhi activities ke prices batao", "what are your prices",
     "full details please", "tell me everything you offer", "Hi I want to know about bungee and rafting prices",
-    "prices", "options", "bungee and rafting prices", "tell me about activities", "kya prices hai", "what is the cost",
+    "Hi! I want to book Bungee or Rafting in Rishikesh. Please share price. (MH)",
+    "Hi! I want to book Bungee or Rafting in Rishikesh. Please share price. (GJ)",
+    "Hi! I want to book Bungee or Rafting in Rishikesh. Please share price. (DL)",
+    "rafting ane bungee no bhav shu chhe", "prices", "options", "bungee and rafting prices", "tell me about activities", "kya prices hai", "what is the cost",
 ])
 def test_overview_asks_match(text):
     assert wants_price_overview(text)
@@ -26,6 +29,7 @@ def test_overview_asks_match(text):
 @pytest.mark.parametrize("text", [
     "bungee price?", "what are the prices for rafting", "I want to book bungee", "hi", "",
     "rafting options", "price of 111m", "price for 4 people", "I want both with package", "I want to book bungee and rafting",
+    "Hi! I want to book Bungee in Rishikesh. Please share price. (GJ)",
     "x " * 400 + "price list",
 ])
 def test_specific_or_other_messages_do_not_match(text):
