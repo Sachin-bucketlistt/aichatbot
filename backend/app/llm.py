@@ -916,6 +916,9 @@ async def stream_chat_response(
             logger.info("Sending the fixed price overview (session=%s)", mask_session_id(session_id))
             # Whole price list asked for: send the fixed message word for word, no model call.
             if session_id:
+                _, region = region_from_messages(chat_messages)   # keep the state tag's language for later turns
+                if region:
+                    await save_region(session_id, region)
                 await save_turn(session_id, user_text, overview)
             yield _sse({"delta": overview, "done": False})
             yield _sse({"delta": "", "done": True})

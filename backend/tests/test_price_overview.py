@@ -93,3 +93,17 @@ def test_web_chat_never_gets_it(monkeypatch):
     monkeypatch.setattr(llm_module.litellm, "acompletion", fake)
     body = client.post("/api/chat", json={"messages": [{"role": "user", "content": "send me the price list"}]}).text
     assert "Welcome to Bucketlistt" not in body
+
+
+def test_state_tag_language_is_remembered_even_though_the_fixed_message_is_sent(monkeypatch):
+    import asyncio
+    from app.schemas import ChatMessage
+    from tests.conftest import FakeRedis
+    _no_llm(monkeypatch)
+    monkeypatch.setattr(session_store, "redis_client", FakeRedis())
+
+    async def run():
+        msgs = [ChatMessage(role="user", content="Hi! I want to book Bungee or Rafting in Rishikesh. Please share price. (GJ)")]
+        _ = [f async for f in llm_module.stream_chat_response(msgs, "wa-po-region", channel="whatsapp", handoff_state={})]
+        return await session_store.get_region("wa-po-region")
+    assert asyncio.run(run()) == "GJ"
